@@ -1,0 +1,108 @@
+{
+  "name": "gohit",
+  "displayName": "GoHit - API Handler Tester",
+  "description": "Test Go API endpoints directly from your code editor",
+  "version": "0.1.0",
+  "publisher": "gohit",
+  "icon": "icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Testing",
+    "Debuggers",
+    "Other"
+  ],
+  "keywords": [
+    "api",
+    "testing",
+    "go",
+    "golang",
+    "http",
+    "rest",
+    "gin",
+    "fiber",
+    "echo"
+  ],
+  "activationEvents": [
+    "onLanguage:go"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "gohit.testEndpoint",
+        "title": "GoHit: Test API Endpoint",
+        "category": "GoHit",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "gohit.manageEnvironments",
+        "title": "GoHit: Manage Environments",
+        "category": "GoHit",
+        "icon": "$(settings-gear)"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "when": "editorLangId == go",
+          "command": "gohit.testEndpoint",
+          "group": "navigation@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "GoHit",
+      "properties": {
+        "gohit.environments": {
+          "type": "array",
+          "default": [
+            {
+              "name": "local",
+              "baseUrl": "http://localhost:8080"
+            }
+          ],
+          "description": "API environment configurations",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Environment name"
+              },
+              "baseUrl": {
+                "type": "string",
+                "description": "Base URL for this environment"
+              }
+            }
+          }
+        },
+        "gohit.activeEnvironment": {
+          "type": "string",
+          "default": "local",
+          "description": "Currently active environment"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "lint": "eslint src --ext ts"
+  },
+  "dependencies": {
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "@vscode/vsce": "^2.22.0",
+    "eslint": "^8.54.0",
+    "typescript": "^5.3.0"
+  }
+}

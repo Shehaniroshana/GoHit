@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GoHit API Tester</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      padding: 20px;
+      background: var(--vscode-editor-background);
+      color: var(--vscode-editor-foreground);
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      font-size: 24px;
+      margin-bottom: 20px;
+      color: var(--vscode-foreground);
+    }
+
+    .section {
+      margin-bottom: 20px;
+      padding: 15px;
+      background: var(--vscode-editor-inactiveSelectionBackground);
+      border-radius: 6px;
+    }
+
+    .section-title {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 10px;
+      color: var(--vscode-foreground);
+    }
+
+    .form-group {
+      margin-bottom: 15px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 13px;
+      color: var(--vscode-descriptionForeground);
+    }
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      padding: 8px;
+      background: var(--vscode-input-background);
+      color: var(--vscode-input-foreground);
+      border: 1px solid var(--vscode-input-border);
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 13px;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      outline: none;
+      border-color: var(--vscode-focusBorder);
+    }
+
+    textarea {
+      font-family: 'Courier New', monospace;
+      resize: vertical;
+      min-height: 100px;
+    }
+
+    .inline-group {
+      display: flex;
+      gap: 10px;
+    }
+
+    .inline-group .form-group {
+      flex: 1;
+    }
+
+    .method-select {
+      max-width: 120px;
+    }
+
+    button {
+      padding: 8px 16px;
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    button:hover {
+      background: var(--vscode-button-hoverBackground);
+    }
+
+    button:active {
+      opacity: 0.8;
+    }
+
+    .primary-button {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+    }
+
+    .secondary-button {
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+    }
+
+    .headers-container {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .header-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .header-row input {
+      flex: 1;
+    }
+
+    .remove-btn {
+      background: var(--vscode-errorForeground);
+      color: white;
+      padding: 6px 12px;
+      font-size: 12px;
+      min-width: auto;
+    }
+
+    .add-header-btn {
+      align-self: flex-start;
+      margin-top: 8px;
+    }
+
+    .response-section {
+      margin-top: 20px;
+    }
+
+    .response-status {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px;
+      background: var(--vscode-editor-inactiveSelectionBackground);
+      border-radius: 4px;
+      margin-bottom: 10px;
+    }
+
+    .status-code {
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .status-success {
+      color: #4caf50;
+    }
+
+    .status-error {
+      color: #f44336;
+    }
+
+    .response-time {
+      color: var(--vscode-descriptionForeground);
+      font-size: 13px;
+    }
+
+    .response-body {
+      background: var(--vscode-editor-background);
+      padding: 15px;
+      border-radius: 4px;
+      overflow-x: auto;
+      max-height: 400px;
+      border: 1px solid var(--vscode-input-border);
+    }
+
+    pre {
+      margin: 0;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    .error-message {
+      padding: 10px;
+      background: var(--vscode-inputValidation-errorBackground);
+      color: var(--vscode-inputValidation-errorForeground);
+      border: 1px solid var(--vscode-inputValidation-errorBorder);
+      border-radius: 4px;
+      margin-bottom: 10px;
+      font-size: 13px;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .loading {
+      opacity: 0.6;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🚀 GoHit API Tester</h1>
+
+    <div class="section">
+      <div class="form-group">
+        <label>Environment</label>
+        <select id="environment">
+          <option value="local">Local</option>
+        </select>
+      </div>
+
+      <div class="inline-group">
+        <div class="form-group method-select">
+          <label>Method</label>
+          <select id="method">
+            <option value="GET">GET</option>
+            <option value="POST">POST</option>
+            <option value="PUT">PUT</option>
+            <option value="PATCH">PATCH</option>
+            <option value="DELETE">DELETE</option>
+            <option value="OPTIONS">OPTIONS</option>
+            <option value="HEAD">HEAD</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>URL</label>
+          <input type="text" id="url" placeholder="/api/endpoint" />
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Headers</div>
+      <div class="headers-container" id="headers-container">
+        <div class="header-row">
+          <input type="text" placeholder="Key" class="header-key" />
+          <input type="text" placeholder="Value" class="header-value" />
+          <button class="remove-btn" onclick="removeHeader(this)">Remove</button>
+        </div>
+      </div>
+      <button class="secondary-button add-header-btn" onclick="addHeader()">+ Add Header</button>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Request Body (JSON)</div>
+      <textarea id="body" placeholder='{\n  "key": "value"\n}'></textarea>
+    </div>
+
+    <button class="primary-button" id="send-btn" onclick="sendRequest()">
+      Send Request
+    </button>
+
+    <div class="response-section hidden" id="response-section">
+      <div class="section-title">Response</div>
+      
+      <div id="error-container" class="hidden">
+        <div class="error-message" id="error-message"></div>
+      </div>
+
+      <div class="response-status">
+        <span class="status-code" id="status-code">200 OK</span>
+        <span class="response-time" id="response-time">123ms</span>
+      </div>
+
+      <div class="response-body">
+        <pre id="response-body"></pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const vscode = acquireVsCodeApi();
+
+    // Handle messages from extension
+    window.addEventListener('message', event => {
+      const message = event.data;
+
+      switch (message.type) {
+        case 'populate':
+          populateRequest(message.data);
+          break;
+        case 'response':
+          displayResponse(message.data);
+          break;
+        case 'environments':
+          updateEnvironments(message.data);
+          break;
+      }
+    });
+
+    function populateRequest(data) {
+      if (data.method) {
+        document.getElementById('method').value = data.method;
+      }
+      if (data.path) {
+        document.getElementById('url').value = data.path;
+      }
+      if (data.body) {
+        document.getElementById('body').value = JSON.stringify(data.body, null, 2);
+      }
+    }
+
+    function updateEnvironments(config) {
+      const select = document.getElementById('environment');
+      select.innerHTML = '';
+
+      config.environments.forEach(env => {
+        const option = document.createElement('option');
+        option.value = env.name;
+        option.textContent = `${env.name} (${env.baseUrl})`;
+        if (env.name === config.active) {
+          option.selected = true;
+        }
+        select.appendChild(option);
+      });
+    }
+
+    function sendRequest() {
+      const method = document.getElementById('method').value;
+      const url = document.getElementById('url').value;
+      const body = document.getElementById('body').value;
+      const environment = document.getElementById('environment').value;
+
+      // Collect headers
+      const headers = {};
+      document.querySelectorAll('.header-row').forEach(row => {
+        const key = row.querySelector('.header-key').value.trim();
+        const value = row.querySelector('.header-value').value.trim();
+        if (key) {
+          headers[key] = value;
+        }
+      });
+
+      // Show loading state
+      document.getElementById('send-btn').classList.add('loading');
+      document.getElementById('send-btn').textContent = 'Sending...';
+
+      vscode.postMessage({
+        type: 'sendRequest',
+        data: {
+          method,
+          url,
+          body,
+          headers,
+          environment
+        }
+      });
+    }
+
+    function displayResponse(response) {
+      // Remove loading state
+      document.getElementById('send-btn').classList.remove('loading');
+      document.getElementById('send-btn').textContent = 'Send Request';
+
+      const responseSection = document.getElementById('response-section');
+      responseSection.classList.remove('hidden');
+
+      if (response.error) {
+        document.getElementById('error-container').classList.remove('hidden');
+        document.getElementById('error-message').textContent = response.error;
+      } else {
+        document.getElementById('error-container').classList.add('hidden');
+      }
+
+      const statusCode = document.getElementById('status-code');
+      statusCode.textContent = `${response.status} ${response.statusText}`;
+      statusCode.className = 'status-code ' + (response.status >= 200 && response.status < 300 ? 'status-success' : 'status-error');
+
+      document.getElementById('response-time').textContent = `${response.time}ms`;
+      document.getElementById('response-body').textContent = response.body;
+    }
+
+    function addHeader() {
+      const container = document.getElementById('headers-container');
+      const row = document.createElement('div');
+      row.className = 'header-row';
+      row.innerHTML = `
+        <input type="text" placeholder="Key" class="header-key" />
+        <input type="text" placeholder="Value" class="header-value" />
+        <button class="remove-btn" onclick="removeHeader(this)">Remove</button>
+      `;
+      container.appendChild(row);
+    }
+
+    function removeHeader(btn) {
+      btn.parentElement.remove();
+    }
+
+    // Environment change handler
+    document.getElementById('environment').addEventListener('change', (e) => {
+      vscode.postMessage({
+        type: 'changeEnvironment',
+        data: e.target.value
+      });
+    });
+
+    // Request initial state
+    vscode.postMessage({ type: 'ready' });
+  </script>
+</body>
+</html>
