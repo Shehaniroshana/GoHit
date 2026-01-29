@@ -15,6 +15,12 @@ Test your Go API endpoints without leaving your editor. No more switching to Pos
 </div>
 
 ---
+<div align="center">
+
+<img width="1754" height="987" alt="image" src="https://github.com/user-attachments/assets/d799dfc8-8778-4aa1-97cb-a78d5372d8c7" />
+
+</div>
+
 
 ## ✨ Features
 
