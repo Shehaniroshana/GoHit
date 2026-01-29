@@ -38,20 +38,54 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
+
             Logger.info(`Found endpoint: ${endpoint.method} ${endpoint.path} (${endpoint.framework})`);
 
             let requestBody = undefined;
-            const structs = analyzer.parseStructs(content);
-            if (structs.length > 0) {
-                if (['POST', 'PUT', 'PATCH'].includes(endpoint.method)) {
+
+            // For POST/PUT/PATCH, try to generate request body
+            if (['POST', 'PUT', 'PATCH'].includes(endpoint.method)) {
+                let targetStructName: string | null = null;
+
+                // PRIORITY 1: If from annotation, use the struct name specified
+                if (endpoint.framework === 'annotation' && endpoint.handler) {
+                    targetStructName = endpoint.handler;
+                    Logger.info(`[ANNOTATION] Using struct "${targetStructName}" from annotation`);
+                } else {
+                    // PRIORITY 2: Fallback - try to find a request struct in current file
+                    const structs = analyzer.parseStructs(content);
                     const requestStruct = structs.find(s =>
                         s.name.toLowerCase().includes('request') ||
                         s.name.toLowerCase().includes('dto') ||
                         s.name.toLowerCase().includes('input')
-                    ) || structs[0];
+                    );
 
-                    requestBody = analyzer.generateJSON(requestStruct, structs);
-                    Logger.info(`Generated request body from struct: ${requestStruct.name}`);
+                    if (requestStruct) {
+                        targetStructName = requestStruct.name;
+                        Logger.info(`[FALLBACK] Using struct "${targetStructName}" from current file`);
+                    }
+                }
+
+                // If we have a struct name, generate the body
+                if (targetStructName) {
+                    // Try current file first
+                    const structs = analyzer.parseStructs(content);
+                    let targetStruct = structs.find(s => s.name === targetStructName);
+
+                    // If not in current file, search workspace (same as suggestion service)
+                    if (!targetStruct) {
+                        Logger.info(`[STRUCT SEARCH] "${targetStructName}" not in current file, searching workspace...`);
+                        const goFiles = await vscode.workspace.findFiles('**/*.go', '**/node_modules/**');
+                        targetStruct = await findStructInWorkspace(goFiles, targetStructName, analyzer);
+                    }
+
+                    if (targetStruct) {
+                        const contextStructs = [targetStruct, ...structs];
+                        requestBody = analyzer.generateJSON(targetStruct, contextStructs);
+                        Logger.info(`✓ Generated request body from struct: ${targetStruct.name}`);
+                    } else {
+                        Logger.warn(`✗ Could not find struct "${targetStructName}"`);
+                    }
                 }
             }
 
@@ -59,7 +93,39 @@ export function activate(context: vscode.ExtensionContext) {
 
         } catch (error) {
             Logger.error('Error testing endpoint', error);
-            vscode.window.showErrorMessage('Failed to test endpoint: ' + (error instanceof Error ? error.message : 'Unknown error'));
+            vscode.window.showErrorMessage(`Failed to test endpoint: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    });
+
+    // New command: Open tester without requiring endpoint
+    const openTesterCommand = vscode.commands.registerCommand('gohit.openTester', async () => {
+        try {
+            Logger.info('Opening GoHit Tester (bypass mode)');
+
+            // Show the panel
+            webviewPanel.showEmpty();
+
+            // Show debug info about detected endpoints
+            const editor = vscode.window.activeTextEditor;
+            if (editor && editor.document.languageId === 'go') {
+                const content = editor.document.getText();
+                const result = parser.parse(content, editor.document.fileName);
+
+                if (result.endpoints.length > 0) {
+                    vscode.window.showInformationMessage(
+                        `Found ${result.endpoints.length} endpoint(s) in this file. Use the auto-suggest feature!`
+                    );
+                    Logger.info(`Detected endpoints: ${JSON.stringify(result.endpoints, null, 2)}`);
+                } else {
+                    vscode.window.showWarningMessage(
+                        'No endpoints detected in this file. The parser might not support your routing style yet.'
+                    );
+                    Logger.warn('No endpoints found by parser in current file');
+                }
+            }
+        } catch (error) {
+            Logger.error('Error opening tester', error);
+            vscode.window.showErrorMessage(`Failed to open tester: ${error instanceof Error ? error.message : String(error)}`);
         }
     });
 
@@ -94,7 +160,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
-    context.subscriptions.push(testEndpointCommand, manageEnvironmentsCommand);
+    context.subscriptions.push(testEndpointCommand, openTesterCommand, manageEnvironmentsCommand);
 }
 
 async function addEnvironment(envManager: EnvironmentManager) {
@@ -212,6 +278,37 @@ async function viewEnvironments(envManager: EnvironmentManager) {
         .join('\n');
 
     vscode.window.showInformationMessage(message, { modal: true });
+}
+
+/**
+ * Helper function to find struct in workspace files
+ * Same logic as EndpointSuggestionService for consistency
+ */
+async function findStructInWorkspace(files: vscode.Uri[], structName: string, analyzer: StructAnalyzer): Promise<any | null> {
+    // Strip package prefix if present
+    const cleanStructName = structName.includes('.') ? structName.split('.').pop()! : structName;
+
+    Logger.debug(`[findStructInWorkspace] Searching "${cleanStructName}" in ${files.length} files`);
+
+    for (const file of files) {
+        try {
+            const document = await vscode.workspace.openTextDocument(file);
+            const content = document.getText();
+            const structs = analyzer.parseStructs(content);
+
+            // Try exact match first
+            const exactMatch = structs.find(s => s.name === cleanStructName);
+            if (exactMatch) {
+                Logger.info(`[findStructInWorkspace] ✓ Found "${exactMatch.name}" in ${file.fsPath}`);
+                return exactMatch;
+            }
+        } catch (e) {
+            // Ignore file read errors
+        }
+    }
+
+    Logger.warn(`[findStructInWorkspace] ✗ Struct "${cleanStructName}" not found`);
+    return null;
 }
 
 export function deactivate() {

@@ -1,7 +1,7 @@
 export interface EndpointInfo {
     method: string;
     path: string;
-    framework: 'net/http' | 'gin' | 'fiber' | 'echo' | 'unknown';
+    framework: 'net/http' | 'gin' | 'fiber' | 'echo' | 'annotation' | 'unknown';
     line: number;
     handler?: string;
 }

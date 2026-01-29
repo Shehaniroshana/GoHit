@@ -41,6 +41,12 @@
         "title": "GoHit: Manage Environments",
         "category": "GoHit",
         "icon": "$(settings-gear)"
+      },
+      {
+        "command": "gohit.openTester",
+        "title": "GoHit: Open API Tester",
+        "category": "GoHit",
+        "icon": "$(testing-run-icon)"
       }
     ],
     "menus": {
