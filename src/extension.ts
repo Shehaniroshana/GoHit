@@ -1,7 +1,5 @@
 import * as vscode from 'vscode';
-import { GoParser } from './parser/goParser';
-import { StructAnalyzer } from './analyzer/structAnalyzer';
-import { WebviewPanel } from './webview/panel';
+import { GoHitViewProvider } from './webview/panel';
 import { EnvironmentManager } from './config/environmentManager';
 import { Logger } from './utils/logger';
 
@@ -9,125 +7,12 @@ export function activate(context: vscode.ExtensionContext) {
     Logger.init();
     Logger.info('GoHit extension activated');
 
-    const parser = new GoParser();
-    const analyzer = new StructAnalyzer();
-    const webviewPanel = new WebviewPanel(context);
+    const gohitProvider = new GoHitViewProvider(context);
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(GoHitViewProvider.viewType, gohitProvider)
+    );
+
     const envManager = new EnvironmentManager();
-
-    const testEndpointCommand = vscode.commands.registerCommand('gohit.testEndpoint', async () => {
-        try {
-            const editor = vscode.window.activeTextEditor;
-            if (!editor) {
-                vscode.window.showWarningMessage('No active editor found');
-                return;
-            }
-
-            if (editor.document.languageId !== 'go') {
-                vscode.window.showWarningMessage('GoHit only works with Go files');
-                return;
-            }
-
-            const content = editor.document.getText();
-            const lineNumber = editor.selection.active.line + 1;
-            const fileName = editor.document.fileName;
-
-            const endpoint = parser.findEndpointAtLine(content, lineNumber, fileName);
-
-            if (!endpoint) {
-                vscode.window.showWarningMessage('No API endpoint found at cursor position');
-                return;
-            }
-
-
-            Logger.info(`Found endpoint: ${endpoint.method} ${endpoint.path} (${endpoint.framework})`);
-
-            let requestBody = undefined;
-
-            // For POST/PUT/PATCH, try to generate request body
-            if (['POST', 'PUT', 'PATCH'].includes(endpoint.method)) {
-                let targetStructName: string | null = null;
-
-                // PRIORITY 1: If from annotation, use the struct name specified
-                if (endpoint.framework === 'annotation' && endpoint.handler) {
-                    targetStructName = endpoint.handler;
-                    Logger.info(`[ANNOTATION] Using struct "${targetStructName}" from annotation`);
-                } else {
-                    // PRIORITY 2: Fallback - try to find a request struct in current file
-                    const structs = analyzer.parseStructs(content);
-                    const requestStruct = structs.find(s =>
-                        s.name.toLowerCase().includes('request') ||
-                        s.name.toLowerCase().includes('dto') ||
-                        s.name.toLowerCase().includes('input')
-                    );
-
-                    if (requestStruct) {
-                        targetStructName = requestStruct.name;
-                        Logger.info(`[FALLBACK] Using struct "${targetStructName}" from current file`);
-                    }
-                }
-
-                // If we have a struct name, generate the body
-                if (targetStructName) {
-                    // Try current file first
-                    const structs = analyzer.parseStructs(content);
-                    let targetStruct = structs.find(s => s.name === targetStructName);
-
-                    // If not in current file, search workspace (same as suggestion service)
-                    if (!targetStruct) {
-                        Logger.info(`[STRUCT SEARCH] "${targetStructName}" not in current file, searching workspace...`);
-                        const goFiles = await vscode.workspace.findFiles('**/*.go', '**/node_modules/**');
-                        targetStruct = await findStructInWorkspace(goFiles, targetStructName, analyzer);
-                    }
-
-                    if (targetStruct) {
-                        const contextStructs = [targetStruct, ...structs];
-                        requestBody = analyzer.generateJSON(targetStruct, contextStructs);
-                        Logger.info(`✓ Generated request body from struct: ${targetStruct.name}`);
-                    } else {
-                        Logger.warn(`✗ Could not find struct "${targetStructName}"`);
-                    }
-                }
-            }
-
-            webviewPanel.show(endpoint, requestBody);
-
-        } catch (error) {
-            Logger.error('Error testing endpoint', error);
-            vscode.window.showErrorMessage(`Failed to test endpoint: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    });
-
-    // New command: Open tester without requiring endpoint
-    const openTesterCommand = vscode.commands.registerCommand('gohit.openTester', async () => {
-        try {
-            Logger.info('Opening GoHit Tester (bypass mode)');
-
-            // Show the panel
-            webviewPanel.showEmpty();
-
-            // Show debug info about detected endpoints
-            const editor = vscode.window.activeTextEditor;
-            if (editor && editor.document.languageId === 'go') {
-                const content = editor.document.getText();
-                const result = parser.parse(content, editor.document.fileName);
-
-                if (result.endpoints.length > 0) {
-                    vscode.window.showInformationMessage(
-                        `Found ${result.endpoints.length} endpoint(s) in this file. Use the auto-suggest feature!`
-                    );
-                    Logger.info(`Detected endpoints: ${JSON.stringify(result.endpoints, null, 2)}`);
-                } else {
-                    vscode.window.showWarningMessage(
-                        'No endpoints detected in this file. The parser might not support your routing style yet.'
-                    );
-                    Logger.warn('No endpoints found by parser in current file');
-                }
-            }
-        } catch (error) {
-            Logger.error('Error opening tester', error);
-            vscode.window.showErrorMessage(`Failed to open tester: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    });
 
     const manageEnvironmentsCommand = vscode.commands.registerCommand('gohit.manageEnvironments', async () => {
         try {
@@ -160,7 +45,20 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
-    context.subscriptions.push(testEndpointCommand, openTesterCommand, manageEnvironmentsCommand);
+    const setApiKeyCommand = vscode.commands.registerCommand('gohit.setOpenRouterApiKey', async () => {
+        const apiKey = await vscode.window.showInputBox({
+            prompt: 'Enter your OpenRouter API Key',
+            password: true,
+            placeHolder: 'sk-or-v1-...'
+        });
+
+        if (apiKey !== undefined) {
+            await vscode.workspace.getConfiguration('gohit').update('openRouterApiKey', apiKey, vscode.ConfigurationTarget.Global);
+            vscode.window.showInformationMessage('OpenRouter API Key saved successfully.');
+        }
+    });
+
+    context.subscriptions.push(manageEnvironmentsCommand, setApiKeyCommand);
 }
 
 async function addEnvironment(envManager: EnvironmentManager) {
@@ -280,36 +178,7 @@ async function viewEnvironments(envManager: EnvironmentManager) {
     vscode.window.showInformationMessage(message, { modal: true });
 }
 
-/**
- * Helper function to find struct in workspace files
- * Same logic as EndpointSuggestionService for consistency
- */
-async function findStructInWorkspace(files: vscode.Uri[], structName: string, analyzer: StructAnalyzer): Promise<any | null> {
-    // Strip package prefix if present
-    const cleanStructName = structName.includes('.') ? structName.split('.').pop()! : structName;
 
-    Logger.debug(`[findStructInWorkspace] Searching "${cleanStructName}" in ${files.length} files`);
-
-    for (const file of files) {
-        try {
-            const document = await vscode.workspace.openTextDocument(file);
-            const content = document.getText();
-            const structs = analyzer.parseStructs(content);
-
-            // Try exact match first
-            const exactMatch = structs.find(s => s.name === cleanStructName);
-            if (exactMatch) {
-                Logger.info(`[findStructInWorkspace] ✓ Found "${exactMatch.name}" in ${file.fsPath}`);
-                return exactMatch;
-            }
-        } catch (e) {
-            // Ignore file read errors
-        }
-    }
-
-    Logger.warn(`[findStructInWorkspace] ✗ Struct "${cleanStructName}" not found`);
-    return null;
-}
 
 export function deactivate() {
     Logger.info('GoHit extension deactivated');

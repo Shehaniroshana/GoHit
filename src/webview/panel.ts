@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import axios from 'axios';
+import WebSocket from 'ws';
 import * as path from 'path';
 import * as fs from 'fs';
 import { EndpointInfo } from '../parser/types';
@@ -7,8 +9,9 @@ import { HttpClient, HttpRequest } from '../client/httpClient';
 import { Logger } from '../utils/logger';
 import { EndpointSuggestionService } from './endpointSuggestionService';
 
-export class WebviewPanel {
-    private panel: vscode.WebviewPanel | undefined;
+export class GoHitViewProvider implements vscode.WebviewViewProvider {
+    public static readonly viewType = 'gohit.testerView';
+    private _view?: vscode.WebviewView;
     private envManager: EnvironmentManager;
     private httpClient: HttpClient;
     private currentEndpoint: EndpointInfo | null = null;
@@ -25,89 +28,47 @@ export class WebviewPanel {
         });
     }
 
+    public resolveWebviewView(
+        webviewView: vscode.WebviewView,
+        context: vscode.WebviewViewResolveContext,
+        _token: vscode.CancellationToken,
+    ) {
+        this._view = webviewView;
+
+        webviewView.webview.options = {
+            enableScripts: true,
+            localResourceRoots: [
+                vscode.Uri.file(path.join(this.context.extensionPath, 'src', 'webview', 'ui'))
+            ]
+        };
+
+        webviewView.webview.html = this.getHtmlContent(webviewView.webview);
+
+        webviewView.webview.onDidReceiveMessage(
+            message => this.handleMessage(message),
+            undefined,
+            this.context.subscriptions
+        );
+
+        setTimeout(() => {
+            this.sendEnvironments();
+            this.sendSuggestions();
+        }, 100);
+    }
+
     public show(endpoint: EndpointInfo, requestBody?: any) {
         this.currentEndpoint = endpoint;
-
-        if (this.panel) {
-            this.panel.reveal(vscode.ViewColumn.Beside);
+        
+        // Focus the view if it exists
+        if (this._view) {
+            this._view.show?.(true); // show view, preserve focus
         } else {
-            this.panel = vscode.window.createWebviewPanel(
-                'gohitTester',
-                'GoHit API Tester',
-                vscode.ViewColumn.Beside,
-                {
-                    enableScripts: true,
-                    retainContextWhenHidden: true,
-                    localResourceRoots: [
-                        vscode.Uri.file(path.join(this.context.extensionPath, 'src', 'webview', 'ui'))
-                    ]
-                }
-            );
-
-            this.panel.webview.html = this.getHtmlContent();
-
-            this.panel.webview.onDidReceiveMessage(
-                message => this.handleMessage(message),
-                undefined,
-                this.context.subscriptions
-            );
-
-            this.panel.onDidDispose(
-                () => {
-                    this.panel = undefined;
-                },
-                null,
-                this.context.subscriptions
-            );
+            vscode.commands.executeCommand('gohit.testerView.focus');
         }
 
         setTimeout(() => {
             this.populateRequest(endpoint, requestBody);
-            this.sendEnvironments();
-        }, 100);
-    }
-
-    /**
-     * Show the panel without any endpoint (for auto-suggest testing)
-     */
-    public showEmpty() {
-        if (this.panel) {
-            this.panel.reveal(vscode.ViewColumn.Beside);
-        } else {
-            this.panel = vscode.window.createWebviewPanel(
-                'gohitTester',
-                'GoHit API Tester',
-                vscode.ViewColumn.Beside,
-                {
-                    enableScripts: true,
-                    retainContextWhenHidden: true,
-                    localResourceRoots: [
-                        vscode.Uri.file(path.join(this.context.extensionPath, 'src', 'webview', 'ui'))
-                    ]
-                }
-            );
-
-            this.panel.webview.html = this.getHtmlContent();
-
-            this.panel.webview.onDidReceiveMessage(
-                message => this.handleMessage(message),
-                undefined,
-                this.context.subscriptions
-            );
-
-            this.panel.onDidDispose(
-                () => {
-                    this.panel = undefined;
-                },
-                null,
-                this.context.subscriptions
-            );
-        }
-
-        setTimeout(() => {
-            this.sendEnvironments();
-            this.sendSuggestions(); // Send suggestions immediately
-        }, 100);
+        }, 500);
     }
 
     private async handleMessage(message: any) {
@@ -118,6 +79,7 @@ export class WebviewPanel {
                 }
                 this.sendEnvironments();
                 this.sendSuggestions();
+                this.handleFetchModels();
                 break;
 
             case 'sendRequest':
@@ -135,22 +97,175 @@ export class WebviewPanel {
             case 'refreshEndpoints':
                 await this.handleRefreshEndpoints();
                 break;
+
+            case 'generateAIBody':
+                await this.handleGenerateAIBody(message.data);
+                break;
+
+            case 'saveSettings':
+                await this.handleSaveSettings(message.data);
+                break;
+
+            case 'fetchModels':
+                await this.handleFetchModels();
+                break;
+
+            case 'addEnvironment':
+                try {
+                    await this.envManager.addEnvironment(message.data);
+                    this.sendEnvironments();
+                } catch (e: any) {
+                    vscode.window.showErrorMessage(e.message);
+                }
+                break;
+
+            case 'deleteEnvironment':
+                try {
+                    await this.envManager.deleteEnvironment(message.data);
+                    this.sendEnvironments();
+                } catch (e: any) {
+                    vscode.window.showErrorMessage(e.message);
+                }
+                break;
+        }
+    }
+
+    private async handleSaveSettings(data: { openRouterApiKey?: string, openRouterAiModel?: string, openRouterAiPrompt?: string }) {
+        const config = vscode.workspace.getConfiguration('gohit');
+        if (data.openRouterApiKey !== undefined) {
+            await config.update('openRouterApiKey', data.openRouterApiKey, vscode.ConfigurationTarget.Global);
+        }
+        if (data.openRouterAiModel !== undefined) {
+            await config.update('openRouterAiModel', data.openRouterAiModel, vscode.ConfigurationTarget.Global);
+        }
+        if (data.openRouterAiPrompt !== undefined) {
+            await config.update('openRouterAiPrompt', data.openRouterAiPrompt, vscode.ConfigurationTarget.Global);
+        }
+        Logger.info('Settings saved from UI');
+        this.sendEnvironments();
+    }
+
+    private async handleFetchModels() {
+        try {
+            const res = await axios.get('https://openrouter.ai/api/v1/models');
+            const models = res.data.data.map((m: any) => {
+                let isFree = false;
+                if (m.pricing && m.pricing.prompt === "0" && m.pricing.completion === "0") {
+                    isFree = true;
+                }
+                return {
+                    id: m.id,
+                    name: m.name,
+                    isFree
+                };
+            });
+            
+            models.sort((a: any, b: any) => {
+                if (a.isFree && !b.isFree) return -1;
+                if (!a.isFree && b.isFree) return 1;
+                return a.name.localeCompare(b.name);
+            });
+
+            this._view?.webview.postMessage({
+                type: 'modelsList',
+                data: models
+            });
+        } catch (e: any) {
+            Logger.error('Failed to fetch OpenRouter models', e.message);
         }
     }
 
     private async handleSendRequest(data: any) {
-        try {
-            // Use baseUrl from request data if provided, otherwise use environment's baseUrl
-            const baseUrl = data.baseUrl || this.envManager.getActiveBaseUrl();
-            let url = data.url;
+        let fullUrl = data.url;
+        if (data.baseUrl && !fullUrl.startsWith('http') && !fullUrl.startsWith('ws')) {
+            const separator = data.baseUrl.endsWith('/') || fullUrl.startsWith('/') ? '' : '/';
+            fullUrl = `${data.baseUrl}${separator}${fullUrl.startsWith('/') ? fullUrl.substring(1) : fullUrl}`;
+        }
 
-            // Prepend base URL if path is relative
-            if (!url.startsWith('http://') && !url.startsWith('https://')) {
-                url = baseUrl + (url.startsWith('/') ? url : '/' + url);
+        const startTime = Date.now();
+
+        if (data.method === 'WS') {
+            try {
+                let wsUrl = fullUrl;
+                if (wsUrl.startsWith('http://')) wsUrl = wsUrl.replace('http://', 'ws://');
+                if (wsUrl.startsWith('https://')) wsUrl = wsUrl.replace('https://', 'wss://');
+                if (!wsUrl.startsWith('ws')) wsUrl = 'ws://' + wsUrl;
+
+                const ws = new WebSocket(wsUrl);
+                
+                ws.on('open', () => {
+                    if (data.body) {
+                        ws.send(typeof data.body === 'string' ? data.body : JSON.stringify(data.body));
+                    } else {
+                        ws.send('ping');
+                    }
+                });
+
+                ws.on('message', (message: any) => {
+                    const time = Date.now() - startTime;
+                    this._view?.webview.postMessage({
+                        type: 'response',
+                        data: {
+                            status: 'WS',
+                            statusText: 'Message Received',
+                            headers: {},
+                            data: message.toString(),
+                            time
+                        }
+                    });
+                    ws.close();
+                });
+
+                ws.on('error', (err: any) => {
+                    const time = Date.now() - startTime;
+                    this._view?.webview.postMessage({
+                        type: 'response',
+                        data: {
+                            status: 'ERROR',
+                            statusText: 'Connection Failed',
+                            headers: {},
+                            data: err.message,
+                            time
+                        }
+                    });
+                });
+
+                setTimeout(() => {
+                    if (ws.readyState === WebSocket.OPEN) {
+                        ws.close();
+                        const time = Date.now() - startTime;
+                        this._view?.webview.postMessage({
+                            type: 'response',
+                            data: {
+                                status: 'WS',
+                                statusText: 'Connection Closed (Timeout)',
+                                headers: {},
+                                data: 'No response received within 5 seconds.',
+                                time
+                            }
+                        });
+                    }
+                }, 5000);
+
+            } catch (error: any) {
+                const time = Date.now() - startTime;
+                this._view?.webview.postMessage({
+                    type: 'response',
+                    data: {
+                        status: 'ERROR',
+                        statusText: 'WebSocket Error',
+                        headers: {},
+                        data: error.message,
+                        time
+                    }
+                });
             }
+            return;
+        }
 
+        try {
             const request: HttpRequest = {
-                url,
+                url: fullUrl,
                 method: data.method,
                 headers: data.headers,
                 body: data.body
@@ -170,7 +285,7 @@ export class WebviewPanel {
     }
 
     private populateRequest(endpoint: EndpointInfo, body?: any) {
-        this.panel?.webview.postMessage({
+        this._view?.webview.postMessage({
             type: 'populate',
             data: {
                 method: endpoint.method,
@@ -181,7 +296,7 @@ export class WebviewPanel {
     }
 
     private sendResponse(response: any) {
-        this.panel?.webview.postMessage({
+        this._view?.webview.postMessage({
             type: 'response',
             data: response
         });
@@ -189,9 +304,19 @@ export class WebviewPanel {
 
     private sendEnvironments() {
         const config = this.envManager.getConfig();
-        this.panel?.webview.postMessage({
+        const vsConfig = vscode.workspace.getConfiguration('gohit');
+        const apiKey = vsConfig.get<string>('openRouterApiKey');
+        const aiModel = vsConfig.get<string>('openRouterAiModel');
+        const aiPrompt = vsConfig.get<string>('openRouterAiPrompt');
+        
+        this._view?.webview.postMessage({
             type: 'environments',
-            data: config
+            data: {
+                ...config,
+                apiKey: apiKey || '',
+                aiModel: aiModel || 'anthropic/claude-3-haiku',
+                aiPrompt: aiPrompt || ''
+            }
         });
     }
 
@@ -200,7 +325,7 @@ export class WebviewPanel {
             ? this.suggestionService.getSuggestions(query)
             : this.suggestionService.getAllEndpoints();
 
-        this.panel?.webview.postMessage({
+        this._view?.webview.postMessage({
             type: 'suggestions',
             data: suggestions
         });
@@ -221,7 +346,84 @@ export class WebviewPanel {
         }
     }
 
-    private getHtmlContent(): string {
+    private async handleGenerateAIBody(data: { method: string, url: string }) {
+        const config = vscode.workspace.getConfiguration('gohit');
+        const apiKey = config.get<string>('openRouterApiKey');
+        const aiModel = config.get<string>('openRouterAiModel') || 'anthropic/claude-3-haiku';
+        const aiPrompt = config.get<string>('openRouterAiPrompt') || '';
+
+        if (!apiKey) {
+            vscode.window.showWarningMessage('OpenRouter API Key not set. Please set it using "GoHit: Set OpenRouter API Key" command.');
+            this._view?.webview.postMessage({
+                type: 'aiBodyGenerated',
+                data: { error: 'OpenRouter API Key not set.' }
+            });
+            return;
+        }
+
+        Logger.info(`Generating AI body for ${data.method} ${data.url}`);
+
+        let systemPrompt = `You are a helpful assistant that generates JSON request bodies for API testing.
+You are generating a request for a ${data.method} request to ${data.url}.
+ONLY return valid JSON. Do not include markdown formatting or explanations.`;
+
+        if (aiPrompt) {
+            systemPrompt += `\n\nUSER CUSTOM SKILLS/INSTRUCTIONS:\n${aiPrompt}`;
+        }
+
+        try {
+            const response = await axios.post(
+                'https://openrouter.ai/api/v1/chat/completions',
+                {
+                    model: aiModel,
+                    messages: [
+                        { role: 'system', content: systemPrompt },
+                        { role: 'user', content: `Generate a realistic JSON request body for ${data.method} ${data.url}.` }
+                    ]
+                },
+                {
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'HTTP-Referer': 'https://github.com/GoHit',
+                        'X-Title': 'GoHit'
+                    }
+                }
+            );
+
+            const rawContent = response.data.choices[0].message.content.trim();
+            
+            let jsonBody;
+            try {
+                let cleanContent = rawContent;
+                if (cleanContent.startsWith('\`\`\`json')) {
+                    cleanContent = cleanContent.replace(/^\`\`\`json\\s*/, '').replace(/\\s*\`\`\`$/, '');
+                } else if (cleanContent.startsWith('\`\`\`')) {
+                    cleanContent = cleanContent.replace(/^\`\`\`\\s*/, '').replace(/\\s*\`\`\`$/, '');
+                }
+                jsonBody = JSON.parse(cleanContent);
+            } catch (e) {
+                Logger.error('Failed to parse AI response as JSON', e);
+                throw new Error('AI returned invalid JSON: ' + rawContent);
+            }
+
+            this._view?.webview.postMessage({
+                type: 'aiBodyGenerated',
+                data: { body: jsonBody }
+            });
+            Logger.info('AI body generation successful');
+
+        } catch (error) {
+            Logger.error('Error generating AI body', error);
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred during AI generation';
+            
+            this._view?.webview.postMessage({
+                type: 'aiBodyGenerated',
+                data: { error: errorMessage }
+            });
+        }
+    }
+
+    private getHtmlContent(webview: vscode.Webview): string {
         const htmlPath = path.join(this.context.extensionPath, 'src', 'webview', 'ui', 'index.html');
         const cssPath = path.join(this.context.extensionPath, 'src', 'webview', 'ui', 'style.css');
         const jsPath = path.join(this.context.extensionPath, 'src', 'webview', 'ui', 'script.js');
@@ -230,8 +432,8 @@ export class WebviewPanel {
             let html = fs.readFileSync(htmlPath, 'utf8');
 
             // Convert file paths to webview URIs
-            const cssUri = this.panel!.webview.asWebviewUri(vscode.Uri.file(cssPath));
-            const jsUri = this.panel!.webview.asWebviewUri(vscode.Uri.file(jsPath));
+            const cssUri = webview.asWebviewUri(vscode.Uri.file(cssPath));
+            const jsUri = webview.asWebviewUri(vscode.Uri.file(jsPath));
 
             // Replace the placeholder paths with actual webview URIs
             html = html.replace('href="style.css"', `href="${cssUri}"`);

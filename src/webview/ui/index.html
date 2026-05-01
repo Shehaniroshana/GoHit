@@ -1,106 +1,165 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GoHit API Tester</title>
+  <title>GoHit Neon</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
-
 <body>
-  <div class="container">
-    <h1>GoHit API Tester</h1>
 
-    <div class="section">
-      <div class="form-group">
-        <label>Environment</label>
-        <select id="environment">
-          <option value="local">Local</option>
-        </select>
+  <!-- Ambient Glow -->
+  <div class="bg-orb orb-1"></div>
+  <div class="bg-orb orb-2"></div>
+
+  <div class="app-container">
+    <div class="header">
+      <div class="brand">
+        <div class="brand-logo">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="url(#grad)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <defs>
+              <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#06b6d4;stop-opacity:1" />
+                <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:1" />
+              </linearGradient>
+            </defs>
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+          </svg>
+        </div>
+        <span class="brand-text">GoHit</span>
+      </div>
+      <div class="nav-group">
+        <button class="nav-btn active" data-target="tab-endpoints" title="APIs">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+        </button>
+        <button class="nav-btn" data-target="tab-tester" title="Tester">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+        </button>
+        <button class="nav-btn" data-target="tab-settings" title="Settings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="scroll-area">
+      <!-- Endpoints -->
+      <div id="tab-endpoints" class="tab-content active">
+        <div class="search-wrapper">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <input type="text" id="sidebar-search" class="glass-input" placeholder="Search routes..." />
+          <button class="icon-btn-small" onclick="refreshEndpoints()" title="Rescan Endpoints">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+          </button>
+        </div>
+        <div id="sidebar-endpoint-list" class="endpoint-list"></div>
       </div>
 
-      <div class="form-group">
-        <label>Base URL</label>
-        <input type="text" id="baseUrl" placeholder="http://localhost:8080" />
-      </div>
-
-      <div class="inline-group">
-        <div class="form-group inline-group-method">
-          <label>Method</label>
-          <div class="custom-select" id="method-select">
-            <div class="custom-select-trigger">
-              <span id="selected-method">POST</span>
-              <svg width="12" height="8" viewBox="0 0 12 8" fill="currentColor">
-                <path d="M1 1l5 5 5-5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"
-                  stroke-linejoin="round" />
-              </svg>
+      <!-- Tester -->
+      <div id="tab-tester" class="tab-content">
+        
+        <!-- Address Block -->
+        <div class="address-block">
+          <div class="env-header">
+            <span class="lbl" style="margin:0;">ENVIRONMENT</span>
+            <select id="environment" class="mini-select"><option value="local">Local</option></select>
+          </div>
+          <div class="address-inputs">
+            <div class="input-row">
+              <span class="row-label">Base</span>
+              <input type="text" id="baseUrl" class="transparent-input" placeholder="http://localhost:8080" />
             </div>
-            <div class="custom-select-options hidden">
-              <div class="custom-select-option" data-value="GET">GET</div>
-              <div class="custom-select-option selected" data-value="POST">POST</div>
-              <div class="custom-select-option" data-value="PUT">PUT</div>
-              <div class="custom-select-option" data-value="PATCH">PATCH</div>
-              <div class="custom-select-option" data-value="DELETE">DELETE</div>
-              <div class="custom-select-option" data-value="OPTIONS">OPTIONS</div>
-              <div class="custom-select-option" data-value="HEAD">HEAD</div>
+            <div class="input-row divider">
+              <select id="method" class="method-select transparent-input">
+                <option value="GET">GET</option>
+                <option value="POST" selected>POST</option>
+                <option value="PUT">PUT</option>
+                <option value="PATCH">PATCH</option>
+                <option value="DELETE">DELETE</option>
+                <option value="WS">WS</option>
+              </select>
+              <input type="text" id="url" class="transparent-input bold-path" placeholder="/api/users" />
             </div>
           </div>
-          <input type="hidden" id="method" value="POST">
         </div>
 
-        <div class="form-group inline-group-url">
-          <label>URL</label>
-          <div class="autocomplete-container">
-            <input type="text" id="url" placeholder="/api/endpoint" autocomplete="off" />
-            <div id="autocomplete-suggestions" class="autocomplete-suggestions hidden"></div>
+        <!-- Request Details Tabs -->
+        <div class="req-tabs">
+          <button class="req-tab active" data-target="req-body">Body</button>
+          <button class="req-tab" data-target="req-headers">Headers</button>
+        </div>
+
+        <!-- Request Body -->
+        <div id="req-body" class="req-content active">
+          <div style="display:flex; justify-content: flex-end; margin-bottom: 8px;">
+            <button class="ai-sparkle" id="ai-generate-btn" onclick="generateAIBody()">✨ Auto-Generate</button>
+          </div>
+          <textarea id="body" class="glass-input code-area" placeholder="{&#10;  // Enter JSON body here&#10;}"></textarea>
+        </div>
+
+        <!-- Request Headers -->
+        <div id="req-headers" class="req-content">
+          <div id="headers-container" class="col" style="gap:8px;"></div>
+          <button class="btn-secondary" style="margin-top:12px; width:100%" onclick="addHeader()">+ Add Header</button>
+        </div>
+
+        <button class="btn-glow" id="send-btn" onclick="sendRequest()" style="margin-top: 10px;">SEND REQUEST</button>
+
+        <div id="response-section" class="glass-card col hidden">
+          <div class="res-header">
+            <span id="status-code" style="font-weight:700"></span>
+            <span id="response-time"></span>
+          </div>
+          <div id="error-container" class="hidden" style="color:var(--neon-pink); font-size:12px; margin-bottom:10px;"></div>
+          <div class="response-box"><pre id="response-body" style="margin:0;"></pre></div>
+        </div>
+      </div>
+
+      <!-- Settings -->
+      <div id="tab-settings" class="tab-content">
+        <!-- Environments Section -->
+        <div class="glass-card col" style="margin-bottom:16px;">
+          <h3 style="margin:0 0 12px 0; font-size:13px; color:var(--neon-cyan);">Environments</h3>
+          <div id="env-list" class="col" style="gap:8px; margin-bottom:12px;"></div>
+          
+          <div class="col" style="gap:8px; padding-top:12px; border-top:1px solid var(--glass-border);">
+            <span class="lbl">Add New Environment</span>
+            <input type="text" id="new-env-name" class="glass-input" placeholder="e.g., Staging" />
+            <input type="text" id="new-env-url" class="glass-input" placeholder="https://api.staging.com" />
+            <button class="btn-secondary mt-2" onclick="addEnvironment()">+ Add Environment</button>
           </div>
         </div>
-      </div>
-    </div>
 
-    <div class="section">
-      <div class="section-title">Headers</div>
-      <div class="headers-container" id="headers-container">
-        <div class="header-row">
-          <input type="text" placeholder="Key" class="header-key" />
-          <input type="text" placeholder="Value" class="header-value" />
-          <button class="remove-btn" onclick="removeHeader(this)">Remove</button>
+        <div class="glass-card col">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+            <div style="background:var(--neon-purple); width:32px; height:32px; border-radius:8px; display:flex; align-items:center; justify-content:center;">
+              <svg width="16" height="16" fill="#fff" viewBox="0 0 16 16"><path d="M8 0L2 6l6 6 6-6-6-6z"/></svg>
+            </div>
+            <h3 style="margin:0;font-size:14px;">OpenRouter AI</h3>
+          </div>
+          <p style="font-size:11px; color:var(--text-secondary); margin:0 0 10px 0;">Enable intelligent JSON payload generation powered by LLMs.</p>
+          <span class="lbl">API Key</span>
+          <input type="password" id="openrouter-key" class="glass-input" placeholder="sk-or-v1-..." />
+          
+          <span class="lbl mt-3" style="display:flex; justify-content:space-between; align-items:center;">
+            <span>AI Model</span>
+            <button class="btn-secondary" style="padding:2px 6px; font-size:10px" onclick="fetchModels()">↻ Load Models</button>
+          </span>
+          <select id="ai-model" class="glass-input">
+            <option value="anthropic/claude-3-haiku">Claude 3 Haiku (Default)</option>
+          </select>
+
+          <span class="lbl mt-3">AI Custom Skill / Prompt</span>
+          <textarea id="ai-prompt" class="glass-input" style="min-height:80px; resize:vertical" placeholder="E.g., Always use UUIDs for user IDs, keep emails valid..."></textarea>
+
+          <button class="btn-secondary mt-3" onclick="saveSettings()">Save Configuration</button>
+          <div id="settings-status" class="hidden" style="color:var(--neon-cyan); font-size:11px; margin-top:8px;">Saved!</div>
         </div>
       </div>
-      <button class="secondary-button add-header-btn" onclick="addHeader()">+ Add Header</button>
-    </div>
 
-    <div class="section">
-      <div class="section-title">Request Body (JSON)</div>
-      <textarea id="body" placeholder='{
-  "key": "value"
-}'></textarea>
-    </div>
-
-    <button class="primary-button" id="send-btn" onclick="sendRequest()">
-      Send Request
-    </button>
-
-    <div class="response-section hidden" id="response-section">
-      <div class="section-title">Response</div>
-
-      <div id="error-container" class="hidden">
-        <div class="error-message" id="error-message"></div>
-      </div>
-
-      <div class="response-status">
-        <span class="status-code" id="status-code">200 OK</span>
-        <span class="response-time" id="response-time">123ms</span>
-      </div>
-
-      <div class="response-body">
-        <pre id="response-body"></pre>
-      </div>
     </div>
   </div>
 
   <script src="script.js"></script>
 </body>
-
 </html>

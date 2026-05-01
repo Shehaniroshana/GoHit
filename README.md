@@ -30,25 +30,27 @@ Detects Go API handlers in all major frameworks:
 - **Gin** - Most popular Go web framework
 - **Fiber** - Express-inspired framework
 - **Echo** - High-performance framework
+- **🌐 WebSockets** - Automatic detection of WS routes
 
 ### 🚀 Inline API Testing
-Test endpoints directly from your code editor - no external tools needed!
+Test endpoints directly from your code editor with a **premium full-height Tester UI** - no external tools needed!
 
 ### 🔍 Intelligent Auto-Suggest
 Smart endpoint suggestions with:
-- 🎨 Color-coded HTTP methods
+- 🎨 Color-coded HTTP methods (**GET, POST, WS, etc.**)
 - 🏷️ Framework identification badges
 - ⌨️ Full keyboard navigation
 - 📝 **Automatic request body generation from Go structs**
 
-### 📝 Smart Request Body Generation
-GoHit analyzes your Go structs and automatically generates example JSON request bodies with appropriate data types and sample values.
+### 🤖 AI-Powered Generation
+Generate request bodies using the latest AI models:
+- **OpenRouter Integration**: Access GPT-4, Claude 3, and more.
+- **🎁 Free Models**: Built-in support for free AI models.
+- **Custom Prompts**: Define "Custom Skills" to guide AI generation.
 
-### 🌍 Environment Management
-Easily switch between local, dev, staging, and production environments with pre-configured base URLs.
-
-### ⚡ Developer Experience
-Stay in your flow - test faster without context switching!
+### 🌍 Advanced Environment Management
+- **Environment UI**: Manage local, staging, and production URLs directly in the extension.
+- **Dynamic Switching**: Seamlessly toggle between environments in the address bar.
 
 ---
 
@@ -214,12 +216,14 @@ Add to your VS Code `settings.json`:
 
 ## 🗺️ Roadmap
 
+- [x] WebSocket testing
+- [x] AI-powered body generation
+- [x] Environment management UI
 - [ ] JWT token auto-extraction and injection
 - [ ] Request history and favorites
 - [ ] Collection management (like Postman)
 - [ ] Code generation from OpenAPI specs
 - [ ] GraphQL support
-- [ ] WebSocket testing
 - [ ] Response validation and assertions
 
 ---

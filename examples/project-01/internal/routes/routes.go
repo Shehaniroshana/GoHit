@@ -11,10 +11,14 @@ func SetupRoutes(r *gin.Engine) {
 	userHandler := handlers.NewUserHandler()
 	productHandler := handlers.NewProductHandler()
 	orderHandler := handlers.NewOrderHandler()
+	wsHandler := handlers.NewWSHandler()
 
 	// API v1 group
 	v1 := r.Group("/api/v1")
 	{
+		// WebSocket route
+		v1.GET("/ws", wsHandler.HandleWS)
+
 		// Health check
 		v1.GET("/health", func(c *gin.Context) {
 			c.JSON(200, gin.H{"status": "ok"})

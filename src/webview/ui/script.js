@@ -1,357 +1,306 @@
 const vscode = acquireVsCodeApi();
 
-// Store suggestions
-let allSuggestions = [];
-let filteredSuggestions = [];
-let selectedIndex = -1;
-
-// Custom Method Dropdown
-const methodSelect = document.getElementById('method-select');
-const methodTrigger = methodSelect.querySelector('.custom-select-trigger');
-const methodOptions = methodSelect.querySelector('.custom-select-options');
-const methodInput = document.getElementById('method');
-const selectedMethodSpan = document.getElementById('selected-method');
-
-// Toggle method dropdown
-methodTrigger.addEventListener('click', (e) => {
-  e.stopPropagation();
-  methodSelect.classList.toggle('open');
-  methodOptions.classList.toggle('hidden');
-});
-
-// Handle method option selection
-methodOptions.querySelectorAll('.custom-select-option').forEach(option => {
-  option.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const value = option.dataset.value;
-    
-    // Update UI
-    selectedMethodSpan.textContent = value;
-    methodInput.value = value;
-    
-    // Update selected state
-    methodOptions.querySelectorAll('.custom-select-option').forEach(opt => {
-      opt.classList.remove('selected');
-    });
-    option.classList.add('selected');
-    
-    // Close dropdown
-    methodSelect.classList.remove('open');
-    methodOptions.classList.add('hidden');
-  });
-});
-
-// Close method dropdown when clicking outside
-document.addEventListener('click', (e) => {
-  if (!methodSelect.contains(e.target)) {
-    methodSelect.classList.remove('open');
-    methodOptions.classList.add('hidden');
-  }
-});
-
-// Handle messages from extension
-window.addEventListener('message', event => {
-  const message = event.data;
-
-  switch (message.type) {
-    case 'populate':
-      populateRequest(message.data);
-      break;
-    case 'response':
-      displayResponse(message.data);
-      break;
-    case 'environments':
-      updateEnvironments(message.data);
-      break;
-    case 'suggestions':
-      handleSuggestions(message.data);
-      break;
-  }
-});
-
-function populateRequest(data) {
-  if (data.method) {
-    // Update custom dropdown
-    selectedMethodSpan.textContent = data.method;
-    methodInput.value = data.method;
-    
-    // Update selected option
-    methodOptions.querySelectorAll('.custom-select-option').forEach(opt => {
-      if (opt.dataset.value === data.method) {
-        opt.classList.add('selected');
-      } else {
-        opt.classList.remove('selected');
-      }
-    });
-  }
-  if (data.path) {
-    document.getElementById('url').value = data.path;
-  }
-  if (data.body) {
-    document.getElementById('body').value = JSON.stringify(data.body, null, 2);
-  }
-}
-
-function updateEnvironments(config) {
-  const select = document.getElementById('environment');
-  const baseUrlInput = document.getElementById('baseUrl');
-  select.innerHTML = '';
-
-  config.environments.forEach(env => {
-    const option = document.createElement('option');
-    option.value = env.name;
-    option.textContent = `${env.name}`;
-    option.dataset.baseUrl = env.baseUrl;
-    if (env.name === config.active) {
-      option.selected = true;
-      baseUrlInput.value = env.baseUrl;
-    }
-    select.appendChild(option);
-  });
-}
-
-function sendRequest() {
-  const method = document.getElementById('method').value;
-  const url = document.getElementById('url').value;
-  const body = document.getElementById('body').value;
-  const environment = document.getElementById('environment').value;
-  const baseUrl = document.getElementById('baseUrl').value;
-
-  // Collect headers
-  const headers = {};
-  document.querySelectorAll('.header-row').forEach(row => {
-    const key = row.querySelector('.header-key').value.trim();
-    const value = row.querySelector('.header-value').value.trim();
-    if (key) {
-      headers[key] = value;
-    }
-  });
-
-  // Show loading state
-  document.getElementById('send-btn').classList.add('loading');
-  document.getElementById('send-btn').textContent = 'Sending...';
-
-  vscode.postMessage({
-    type: 'sendRequest',
-    data: {
-      method,
-      url,
-      body,
-      headers,
-      environment,
-      baseUrl
-    }
-  });
-}
-
-function displayResponse(response) {
-  // Remove loading state
-  document.getElementById('send-btn').classList.remove('loading');
-  document.getElementById('send-btn').textContent = 'Send Request';
-
-  const responseSection = document.getElementById('response-section');
-  responseSection.classList.remove('hidden');
-
-  if (response.error) {
-    document.getElementById('error-container').classList.remove('hidden');
-    document.getElementById('error-message').textContent = response.error;
-  } else {
-    document.getElementById('error-container').classList.add('hidden');
-  }
-
-  const statusCode = document.getElementById('status-code');
-  statusCode.textContent = `${response.status} ${response.statusText}`;
-  statusCode.className = 'status-code ' + (response.status >= 200 && response.status < 300 ? 'status-success' : 'status-error');
-
-  document.getElementById('response-time').textContent = `${response.time}ms`;
-  document.getElementById('response-body').textContent = response.body;
-}
-
-function addHeader() {
-  const container = document.getElementById('headers-container');
-  const row = document.createElement('div');
-  row.className = 'header-row';
-  row.innerHTML = `
-    <input type="text" placeholder="Key" class="header-key" />
-    <input type="text" placeholder="Value" class="header-value" />
-    <button class="remove-btn" onclick="removeHeader(this)">Remove</button>
-  `;
-  container.appendChild(row);
-}
-
-function removeHeader(btn) {
-  btn.parentElement.remove();
-}
-
-// Environment change handler
-document.getElementById('environment').addEventListener('change', (e) => {
-  const selectedOption = e.target.options[e.target.selectedIndex];
-  const baseUrlInput = document.getElementById('baseUrl');
-
-  // Update base URL field with the environment's base URL
-  if (selectedOption.dataset.baseUrl) {
-    baseUrlInput.value = selectedOption.dataset.baseUrl;
-  }
-
-  vscode.postMessage({
-    type: 'changeEnvironment',
-    data: e.target.value
-  });
-});
-
-// Auto-suggest functionality
+// DOM Elements
 const urlInput = document.getElementById('url');
-const suggestionsDiv = document.getElementById('autocomplete-suggestions');
+const methodSelect = document.getElementById('method');
+const envSelect = document.getElementById('environment');
+const baseUrlInput = document.getElementById('baseUrl');
+const headersContainer = document.getElementById('headers-container');
+const bodyInput = document.getElementById('body');
+const sendBtn = document.getElementById('send-btn');
+const responseSection = document.getElementById('response-section');
+const statusCodeEl = document.getElementById('status-code');
+const responseTimeEl = document.getElementById('response-time');
+const responseBodyEl = document.getElementById('response-body');
+const errorContainer = document.getElementById('error-container');
 
-function handleSuggestions(suggestions) {
-  console.log('[GoHit] handleSuggestions called with:', suggestions);
-  allSuggestions = suggestions || [];
-  console.log(`[GoHit] Stored ${allSuggestions.length} suggestions`);
+// State
+let allSuggestions = [];
 
-  // Immediately show suggestions if URL field has text
-  const currentQuery = urlInput.value;
-  if (currentQuery) {
-    const filtered = filterSuggestions(currentQuery);
-    console.log(`[GoHit] Auto-filtering with query "${currentQuery}", found ${filtered.length} matches`);
-    showSuggestions(filtered);
-  }
+// --- Tabs ---
+document.querySelectorAll('.nav-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.target).classList.add('active');
+  });
+});
+
+function switchTab(targetId) {
+  const btn = document.querySelector(`.nav-btn[data-target="${targetId}"]`);
+  if (btn) btn.click();
 }
 
-function filterSuggestions(query) {
-  if (!query || query.trim() === '') {
-    return [];
+// --- Sub Tabs (Tester) ---
+document.querySelectorAll('.req-tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.req-tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.req-content').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.target).classList.add('active');
+  });
+});
+
+window.refreshEndpoints = function() {
+  vscode.postMessage({ type: 'refreshEndpoints' });
+  const btn = document.querySelector('.icon-btn-small');
+  if (btn) {
+    btn.classList.add('spinning');
+    setTimeout(() => btn.classList.remove('spinning'), 1000);
   }
+};
 
-  const lowerQuery = query.toLowerCase();
-  return allSuggestions.filter(s =>
-    s.path.toLowerCase().includes(lowerQuery) ||
-    s.method.toLowerCase().includes(lowerQuery)
-  ).slice(0, 10); // Limit to top 10 results
-}
-
-function showSuggestions(suggestions) {
-  filteredSuggestions = suggestions;
-  selectedIndex = -1;
-
-  if (suggestions.length === 0) {
-    suggestionsDiv.classList.add('hidden');
+// --- Endpoints ---
+function populateSidebar(endpoints) {
+  const list = document.getElementById('sidebar-endpoint-list');
+  if (!endpoints || endpoints.length === 0) {
+    list.innerHTML = `<div style="text-align:center; padding: 40px 0; color: var(--text-secondary); font-size:11px;">Scanning endpoints...</div>`;
     return;
   }
-
-  suggestionsDiv.innerHTML = suggestions.map((s, index) => `
-    <div class="autocomplete-item" data-index="${index}">
-      <span class="autocomplete-method method-${s.method.toLowerCase()}">${s.method}</span>
-      <span class="autocomplete-path">${s.path}</span>
-      <span class="autocomplete-framework">${s.framework}</span>
+  
+  list.innerHTML = endpoints.map((s, index) => `
+    <div class="ep-card" onclick="selectSidebarItem(${index})">
+      <div class="ep-header">
+        <span class="ep-method method-${s.method.toLowerCase()}">${s.method}</span>
+        <span class="ep-path" title="${s.path}">${s.path}</span>
+      </div>
+      <div class="ep-footer">
+        <span>${s.framework}</span>
+        <span>${s.file.split(/[\\\\/]/).pop()}</span>
+      </div>
     </div>
   `).join('');
-
-  // Add click handlers
-  suggestionsDiv.querySelectorAll('.autocomplete-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const index = parseInt(item.dataset.index);
-      selectSuggestion(filteredSuggestions[index]);
-    });
-  });
-
-  suggestionsDiv.classList.remove('hidden');
 }
 
-function selectSuggestion(suggestion) {
-  if (!suggestion) return;
-
+window.selectSidebarItem = function(index) {
+  const suggestion = allSuggestions[index];
+  methodSelect.value = suggestion.method;
+  updateMethodColor();
   urlInput.value = suggestion.path;
-  
-  // Update custom dropdown
-  selectedMethodSpan.textContent = suggestion.method;
-  methodInput.value = suggestion.method;
-  
-  // Update selected option
-  methodOptions.querySelectorAll('.custom-select-option').forEach(opt => {
-    if (opt.dataset.value === suggestion.method) {
-      opt.classList.add('selected');
-    } else {
-      opt.classList.remove('selected');
-    }
-  });
+  bodyInput.value = '';
+  switchTab('tab-tester');
+};
 
-  // Populate body if example exists
-  if (suggestion.bodyExample) {
-    const bodyField = document.getElementById('body');
-    bodyField.value = JSON.stringify(suggestion.bodyExample, null, 2);
+document.getElementById('sidebar-search').addEventListener('input', (e) => {
+  const query = e.target.value.toLowerCase();
+  if (!query) {
+    populateSidebar(allSuggestions);
+    return;
   }
-
-  hideSuggestions();
-}
-
-function hideSuggestions() {
-  suggestionsDiv.classList.add('hidden');
-  selectedIndex = -1;
-}
-
-function highlightItem(index) {
-  const items = suggestionsDiv.querySelectorAll('.autocomplete-item');
-  items.forEach((item, i) => {
-    if (i === index) {
-      item.classList.add('selected');
-      item.scrollIntoView({ block: 'nearest' });
-    } else {
-      item.classList.remove('selected');
-    }
-  });
-}
-
-// URL input events
-urlInput.addEventListener('input', (e) => {
-  const query = e.target.value;
-  const suggestions = filterSuggestions(query);
-  showSuggestions(suggestions);
+  const filtered = allSuggestions.filter(s => 
+    s.path.toLowerCase().includes(query) || s.method.toLowerCase().includes(query)
+  );
+  populateSidebar(filtered);
 });
 
-urlInput.addEventListener('focus', (e) => {
-  const query = e.target.value;
-  if (query) {
-    const suggestions = filterSuggestions(query);
-    showSuggestions(suggestions);
+// --- Headers ---
+window.addHeader = function(key = '', value = '') {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = `
+    <input type="text" class="glass-input hk" placeholder="Key" value="${key}">
+    <input type="text" class="glass-input hv" placeholder="Value" value="${value}">
+    <button class="btn-secondary" style="border:none" onclick="this.parentElement.remove()">✕</button>
+  `;
+  headersContainer.appendChild(row);
+};
+
+function getHeaders() {
+  const headers = {};
+  headersContainer.querySelectorAll('.row').forEach(row => {
+    const k = row.querySelector('.hk').value.trim();
+    const v = row.querySelector('.hv').value.trim();
+    if (k) headers[k] = v;
+  });
+  return headers;
+}
+
+// --- Request ---
+window.sendRequest = function() {
+  const method = methodSelect.value;
+  const url = urlInput.value;
+  const headers = getHeaders();
+  
+  let body;
+  try {
+    const txt = bodyInput.value.trim();
+    body = txt ? JSON.parse(txt) : undefined;
+  } catch (e) {
+    showError('Invalid JSON in Request Body');
+    return;
   }
-});
+  
+  const oHtml = sendBtn.innerHTML;
+  sendBtn.dataset.oHtml = oHtml;
+  sendBtn.innerHTML = 'SENDING...';
+  sendBtn.disabled = true;
+  
+  responseSection.classList.add('hidden');
+  errorContainer.classList.add('hidden');
+  
+  vscode.postMessage({
+    type: 'sendRequest',
+    data: { method, url, baseUrl: baseUrlInput.value.trim(), headers, body }
+  });
+};
 
-urlInput.addEventListener('keydown', (e) => {
-  if (suggestionsDiv.classList.contains('hidden')) return;
+function showError(msg) {
+  errorContainer.textContent = msg;
+  errorContainer.classList.remove('hidden');
+  responseSection.classList.remove('hidden');
+  responseBodyEl.textContent = '';
+  statusCodeEl.textContent = '';
+  responseTimeEl.textContent = '';
+  
+  if (sendBtn.dataset.oHtml) sendBtn.innerHTML = sendBtn.dataset.oHtml;
+  sendBtn.disabled = false;
+}
 
-  switch (e.key) {
-    case 'ArrowDown':
-      e.preventDefault();
-      selectedIndex = Math.min(selectedIndex + 1, filteredSuggestions.length - 1);
-      highlightItem(selectedIndex);
-      break;
+// --- Settings & AI ---
+window.saveSettings = function() {
+  const apiKey = document.getElementById('openrouter-key').value.trim();
+  const aiModel = document.getElementById('ai-model').value;
+  const aiPrompt = document.getElementById('ai-prompt').value.trim();
+  
+  vscode.postMessage({ 
+    type: 'saveSettings', 
+    data: { openRouterApiKey: apiKey, openRouterAiModel: aiModel, openRouterAiPrompt: aiPrompt } 
+  });
+  
+  const st = document.getElementById('settings-status');
+  st.classList.remove('hidden');
+  setTimeout(() => st.classList.add('hidden'), 3000);
+};
 
-    case 'ArrowUp':
-      e.preventDefault();
-      selectedIndex = Math.max(selectedIndex - 1, 0);
-      highlightItem(selectedIndex);
-      break;
+window.generateAIBody = function() {
+  const method = methodSelect.value;
+  const url = urlInput.value;
+  if (!url || url.trim() === '') return;
+  
+  const btn = document.getElementById('ai-generate-btn');
+  btn.dataset.oHtml = btn.innerHTML;
+  btn.innerHTML = '✨ Generating...';
+  
+  vscode.postMessage({ type: 'generateAIBody', data: { method, url } });
+};
 
-    case 'Enter':
-      e.preventDefault();
-      if (selectedIndex >= 0 && selectedIndex < filteredSuggestions.length) {
-        selectSuggestion(filteredSuggestions[selectedIndex]);
+window.fetchModels = function() {
+  vscode.postMessage({ type: 'fetchModels' });
+  document.getElementById('ai-model').innerHTML = '<option value="">Fetching models...</option>';
+};
+
+window.addEnvironment = function() {
+  const name = document.getElementById('new-env-name').value.trim();
+  const baseUrl = document.getElementById('new-env-url').value.trim();
+  if (name && baseUrl) {
+    vscode.postMessage({ type: 'addEnvironment', data: { name, baseUrl } });
+    document.getElementById('new-env-name').value = '';
+    document.getElementById('new-env-url').value = '';
+  }
+};
+
+window.deleteEnvironment = function(name) {
+  vscode.postMessage({ type: 'deleteEnvironment', data: name });
+};
+
+// --- Messages ---
+window.addEventListener('message', e => {
+  const msg = e.data;
+  
+  if (msg.type === 'suggestions') {
+    allSuggestions = msg.data || [];
+    populateSidebar(allSuggestions);
+  }
+  
+  if (msg.type === 'populate') {
+    methodSelect.value = msg.data.method;
+    updateMethodColor();
+    urlInput.value = msg.data.path;
+    if (msg.data.body) bodyInput.value = JSON.stringify(msg.data.body, null, 2);
+  }
+  
+  if (msg.type === 'response') {
+    if (sendBtn.dataset.oHtml) sendBtn.innerHTML = sendBtn.dataset.oHtml;
+    sendBtn.disabled = false;
+    errorContainer.classList.add('hidden');
+    responseSection.classList.remove('hidden');
+    
+    const { status, statusText, data, time } = msg.data;
+    statusCodeEl.textContent = `${status} ${statusText}`;
+    statusCodeEl.className = status >= 400 || status === 'ERROR' ? 'status-red' : 'status-green';
+    responseTimeEl.textContent = `${time}ms`;
+    
+    let displayData = data;
+    if (typeof data === 'object') {
+      displayData = JSON.stringify(data, null, 2);
+    }
+    responseBodyEl.textContent = displayData;
+  }
+  
+  if (msg.type === 'modelsList') {
+    const select = document.getElementById('ai-model');
+    select.innerHTML = msg.data.map(m => 
+      `<option value="${m.id}">${m.isFree ? '🎁 FREE: ' : ''}${m.name}</option>`
+    ).join('');
+    if (window.lastSavedModel) {
+      select.value = window.lastSavedModel;
+    }
+  }
+
+  if (msg.type === 'environments') {
+    const active = msg.data.active;
+    envSelect.innerHTML = msg.data.environments.map(en => `<option value="${en.name}" ${en.name === active ? 'selected' : ''}>${en.name}</option>`).join('');
+    const actObj = msg.data.environments.find(en => en.name === active);
+    if (actObj) baseUrlInput.value = actObj.baseUrl;
+    
+    // Update Environment List in Settings
+    const envList = document.getElementById('env-list');
+    if (envList) {
+        envList.innerHTML = msg.data.environments.map(en => `
+            <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.03); padding:8px 12px; border-radius:8px; border:1px solid var(--glass-border);">
+                <div class="col" style="gap:2px;">
+                    <span style="font-size:12px; font-weight:700; color:var(--text-primary);">${en.name}</span>
+                    <span style="font-size:10px; color:var(--text-secondary); opacity:0.7;">${en.baseUrl}</span>
+                </div>
+                ${en.name !== 'local' ? `<button class="btn-secondary" style="border:none; color:#ef4444; width:24px; height:24px; padding:0;" onclick="deleteEnvironment('${en.name}')">✕</button>` : ''}
+            </div>
+        `).join('');
+    }
+
+    if (msg.data.apiKey) document.getElementById('openrouter-key').value = msg.data.apiKey;
+    if (msg.data.aiModel) {
+      window.lastSavedModel = msg.data.aiModel;
+      
+      const sel = document.getElementById('ai-model');
+      if (sel.querySelector(`option[value="${msg.data.aiModel}"]`)) {
+        sel.value = msg.data.aiModel;
+      } else if (!sel.innerHTML.includes('Fetching')) {
+        sel.innerHTML += `<option value="${msg.data.aiModel}">${msg.data.aiModel}</option>`;
+        sel.value = msg.data.aiModel;
       }
-      break;
-
-    case 'Escape':
-      e.preventDefault();
-      hideSuggestions();
-      break;
+    }
+    if (msg.data.aiPrompt) document.getElementById('ai-prompt').value = msg.data.aiPrompt;
+  }
+  
+  if (msg.type === 'aiBodyGenerated') {
+    const btn = document.getElementById('ai-generate-btn');
+    if (btn.dataset.oHtml) btn.innerHTML = btn.dataset.oHtml;
+    
+    if (msg.data.error) alert("AI Error: " + msg.data.error);
+    else if (msg.data.body) bodyInput.value = JSON.stringify(msg.data.body, null, 2);
   }
 });
 
-// Hide suggestions when clicking outside
-document.addEventListener('click', (e) => {
-  if (!e.target.closest('.autocomplete-container')) {
-    hideSuggestions();
-  }
+function updateMethodColor() {
+  const m = methodSelect.value.toLowerCase();
+  methodSelect.className = `method-select method-${m}-text`;
+}
+methodSelect.addEventListener('change', updateMethodColor);
+updateMethodColor(); // Initial call
+
+envSelect.addEventListener('change', (e) => {
+  vscode.postMessage({ type: 'changeEnvironment', data: e.target.value });
 });
 
-// Request initial state
 vscode.postMessage({ type: 'ready' });

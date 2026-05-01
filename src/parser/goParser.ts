@@ -27,7 +27,7 @@ export class GoParser {
         const endpoints: EndpointInfo[] = [];
         const lines = content.split('\n');
 
-        const annotationRegex = /\/\/\s*@gohit\s+(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+(\S+)(?:\s+(\S+))?/i;
+        const annotationRegex = /\/\/\s*@gohit\s+(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD|WS)\s+(\S+)(?:\s+(\S+))?/i;
 
         lines.forEach((line, index) => {
             const match = line.match(annotationRegex);
@@ -60,10 +60,10 @@ export class GoParser {
         const normalizedContent = this.normalizeMultiLineStatements(content);
         const lines = normalizedContent.split('\n');
 
-        const hasGin = /gin\..*gin\.Engine|gin\.Default\(\)|gin\.New\(\)/.test(content);
-        const hasFiber = /fiber\..*fiber\.App|fiber\.New\(\)/.test(content);
-        const hasEcho = /echo\..*echo\.Echo|echo\.New\(\)/.test(content);
-        const hasNetHttp = /http\.HandleFunc|http\.Handle\(/.test(content);
+        const hasGin = /gin\.(?:Engine|Default|New|Group)/.test(content) || /"github\.com\/gin-gonic\/gin"/.test(content);
+        const hasFiber = /fiber\.(?:App|New|Group)/.test(content) || /"github\.com\/gofiber\/fiber/.test(content);
+        const hasEcho = /echo\.(?:Echo|New|Group)/.test(content) || /"github\.com\/labstack\/echo/.test(content);
+        const hasNetHttp = /http\.HandleFunc|http\.Handle\(/.test(content) || /"net\/http"/.test(content);
 
         // Track variables that hold router groups and their prefixes
         const routeGroups: Record<string, string> = {
@@ -146,8 +146,23 @@ export class GoParser {
                     fullPath = fullPath.slice(0, -1);
                 }
 
+                // Heuristic: Detect WebSocket endpoints
+                let finalMethod = method;
+                const lowPath = fullPath.toLowerCase();
+                const lowHandler = handler.toLowerCase();
+                if (method === 'GET' && (
+                    lowPath.endsWith('/ws') || 
+                    lowPath.includes('/websocket') || 
+                    lowPath.includes('/socket') ||
+                    lowHandler.includes('ws') || 
+                    lowHandler.includes('websocket') ||
+                    lowHandler.includes('socket')
+                )) {
+                    finalMethod = 'WS';
+                }
+
                 endpoints.push({
-                    method,
+                    method: finalMethod,
                     path: fullPath || '/',
                     framework,
                     line: lineNumber,
@@ -175,11 +190,11 @@ export class GoParser {
             };
 
             if (hasGin) {
-                const ginMatch = line.match(/(\w+)\.(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s*\(\s*["']([^"']*)["']\s*,\s*(.+)/);
+                const ginMatch = line.match(/(\w+)\.(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD|WS)\s*\(\s*["']([^"']*)["']\s*,\s*(.+)/);
                 if (ginMatch) {
                     const handlerChain = extractHandlers(ginMatch[4]);
                     if (handlerChain) {
-                        addEndpoint('gin', ginMatch[2], ginMatch[3], ginMatch[1], handlerChain);
+                        addEndpoint('gin', ginMatch[2].toUpperCase(), ginMatch[3], ginMatch[1], handlerChain);
                     }
                 }
             }
