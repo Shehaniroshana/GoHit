@@ -172,9 +172,9 @@ export class GoParser {
 
             const extractHandlers = (handlerString: string): string => {
                 // Remove inline function definitions: func(...) { ... }
-                handlerString = handlerString.replace(/func\s*\([^)]*\)\s*\{[\s\S]*?\}/g, '');
-                handlerString = handlerString.replace(/func\s*\([^)]*\)\s*error\s*\{[\s\S]*?\}/g, '');
-
+                // Use a slightly better regex that handles one level of nested braces (heuristic)
+                handlerString = handlerString.replace(/func\s*\([^)]*\)\s*(?:\w+\s+)?\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g, '[inline]');
+                
                 // Extract identifiers (function names, obj.method)
                 const handlers = handlerString
                     .split(',')
@@ -186,7 +186,7 @@ export class GoParser {
                     })
                     .filter(h => h.length > 0 && !h.startsWith('middleware.'));
 
-                return handlers.join('|');
+                return handlers.length > 0 ? handlers.join('|') : 'anonymous';
             };
 
             if (hasGin) {
