@@ -14,7 +14,7 @@ func SetupRoutes(r *gin.Engine) {
 	wsHandler := handlers.NewWSHandler()
 
 	// API v1 group
-	v1 := r.Group("/api/v1")
+	v1 := r.Group("/gin/api/v1")
 	{
 		// WebSocket route
 		v1.GET("/ws", wsHandler.HandleWS)

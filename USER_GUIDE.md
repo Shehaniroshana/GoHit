@@ -8,10 +8,10 @@ Welcome to **GoHit** - the ultimate VS Code extension for testing Go API endpoin
 2. [Features Overview](#features-overview)
 3. [Basic Usage](#basic-usage)
 4. [Annotation System](#annotation-system)
-5. [Auto-Suggest Feature](#auto-suggest-feature)
-6. [Environment Management](#environment-management)
-7. [Supported Frameworks](#supported-frameworks)
-8. [Best Practices](#best-practices)
+5. [Advanced Auth](#advanced-auth)
+6. [WebSocket Testing](#websocket-testing)
+7. [Environment Management](#environment-management)
+8. [Supported Frameworks](#supported-frameworks)
 9. [Troubleshooting](#troubleshooting)
 
 ---
@@ -31,45 +31,43 @@ Welcome to **GoHit** - the ultimate VS Code extension for testing Go API endpoin
 
 ### Quick Start
 
-**Method 1: Test from Code**
-1. Open any Go file with API handlers
-2. Place your cursor on a route/handler line
-3. Right-click → Select **"GoHit: Test API Endpoint"**
-4. The API tester panel opens with auto-detected endpoint information
+**Method 1: Zero-Config Discovery**
+1. Press `Ctrl+Shift+P` → **"GoHit: Open API Tester"**
+2. The sidebar automatically lists all routes in your workspace.
+3. Click an endpoint to pre-fill the tester.
 
-**Method 2: Use Command Palette**
-1. Press `Ctrl+Shift+P` (Windows/Linux) or `Cmd+Shift+P` (Mac)
-2. Type **"GoHit: Open API Tester"**
-3. Start typing in the URL field to see endpoint suggestions
+**Method 2: Test from Code**
+1. Right-click on any route or handler line → **"GoHit: Test API Endpoint"**
+2. The premium tester panel opens instantly with the route pre-loaded.
 
 ---
 
 ## Features Overview
 
-### 🎯 Automatic Handler Detection
-GoHit automatically detects API handlers in your code for:
-- **net/http** - Standard library handlers
-- **Gin** - gin.Engine router methods
-- **Fiber** - fiber.App route methods
-- **Echo** - echo.Echo route methods
+### Workspace Route Detection
+GoHit automatically scans your workspace to identify endpoints across multiple frameworks:
+- **net/http**
+- **Gin** (including nested group structures)
+- **Fiber** (including v2 and PascalCase methods)
+- **Echo** (full route tree extraction)
 
-### 🚀 Inline API Testing
-Test endpoints without leaving VS Code or switching to external tools like Postman or Insomnia.
+### Modern User Interface
+A clean, integrated interface designed for efficient development:
+- **Horizontal Address Bar**: Space-efficient layout for request configuration.
+- **Full-Height Sidebar**: Unified navigation for all project endpoints.
+- **Native Notifications**: Real-time feedback using the VS Code notification API.
+
+### Export to cURL
+Quickly export any request for terminal use. Click the cURL icon to copy the full command including headers, authentication, and body.
 
 ### 🔍 Intelligent Auto-Suggest
 As you type in the URL field, GoHit suggests available endpoints with:
 - Color-coded HTTP methods
 - Framework identification
-- Automatic request body generation
+- **Context-Aware Body Gen**: Scans your local Go structs to create perfect JSON examples.
 
-### 📝 Smart Request Body Generation
-GoHit analyzes your Go structs and automatically generates example JSON request bodies with appropriate data types and sample values.
-
-### 🌍 Environment Management
-Easily switch between different environments (local, dev, staging, production) with pre-configured base URLs.
-
-### ⚡ Fast & Integrated
-Stay in your development flow - no context switching required!
+### 🤖 AI-Powered Payload Generation
+Generate request bodies using the latest AI models via OpenRouter (GPT-4, Claude 3, etc.). The AI "sees" your Go structs and current payload to provide the best results.
 
 ---
 
@@ -83,56 +81,50 @@ Stay in your development flow - no context switching required!
 
 #### Step 2: Configure Request
 The API tester panel shows:
-- **Environment**: Select from configured environments (local, dev, staging, etc.)
-- **HTTP Method**: Automatically detected or manually selected (GET, POST, PUT, DELETE, etc.)
-- **URL**: Endpoint path (auto-filled if detected)
-- **Headers**: Add custom headers (JSON format)
-- **Body**: Request body (auto-generated for POST/PUT/PATCH)
+- **Environment**: Select from configured environments.
+- **HTTP Method**: Automatically detected or manually selected.
+- **URL**: Endpoint path (auto-filled if detected).
+- **Body**: JSON area (use "Auto-Generate" for instant examples).
+- **Headers**: Custom key-value pairs.
+- **Auth**: Configure Bearer tokens or API keys.
 
 #### Step 3: Send Request
-Click the **Send Request** button to execute the HTTP request.
+Click the **Send Request** button.
 
 #### Step 4: View Response
 The response panel displays:
-- **Status Code**: HTTP response status
-- **Response Time**: Request duration
-- **Headers**: Response headers
-- **Body**: Response body (formatted JSON or raw text)
+- **Status Code**: Color-coded status (Green for success, Red for errors).
+- **Response Time**: Accurate request duration.
+- **Body**: Formatted JSON or raw response.
 
-### Example Workflow
+---
 
-```go
-// File: handlers/user.go
-package handlers
+## Advanced Auth
 
-import "github.com/gin-gonic/gin"
+GoHit includes a dedicated **Auth Tab** for managing credentials:
 
-type CreateUserRequest struct {
-    Name  string `json:"name" binding:"required"`
-    Email string `json:"email" binding:"required,email"`
-    Age   int    `json:"age"`
-}
+### 🔑 Bearer Token
+1. Select **Bearer Token** in the Auth tab.
+2. Paste your token.
+3. GoHit automatically adds the `Authorization: Bearer <token>` header to your requests.
 
-// @gohit POST /api/users CreateUserRequest
-func CreateUser(c *gin.Context) {
-    var req CreateUserRequest
-    if err := c.ShouldBindJSON(&req); err != nil {
-        c.JSON(400, gin.H{"error": err.Error()})
-        return
-    }
-    // Your logic here
-    c.JSON(201, gin.H{"message": "User created"})
-}
-```
+### 🛡️ API Key
+1. Select **API Key** in the Auth tab.
+2. Enter the **Header Key** (e.g., `X-API-Key`).
+3. Enter the **Key Value**.
+4. GoHit injects this header into every request.
 
-1. Place cursor on the function or annotation
-2. Right-click → **"GoHit: Test API Endpoint"**
-3. Panel opens with:
-   - Method: `POST`
-   - URL: `/api/users`
-   - Body: Auto-generated JSON from `CreateUserRequest`
-4. Click **Send Request**
-5. View the response!
+---
+
+## WebSocket Testing
+
+GoHit features a built-in **WebSocket Terminal**:
+
+1. Select **WS** as the method.
+2. Enter your WebSocket URL (e.g., `ws://localhost:8080/stream`).
+3. Click **Connect**.
+4. Use the terminal at the bottom to send messages and view real-time logs.
+5. Logs are color-coded: **Green** for sent, **Blue** for received, **Red** for errors.
 
 ---
 
@@ -140,7 +132,7 @@ func CreateUser(c *gin.Context) {
 
 ### Why Use Annotations?
 
-Auto-detecting endpoints from routing code can be complex and fragile across different project structures. **Annotations give you full control** - just add one comment line above your handler!
+While zero-config detection is powerful, **Annotations give you 100% control**. They are perfect for complex project structures or mapping specific DTOs to handlers.
 
 ### Annotation Format
 
@@ -149,15 +141,24 @@ Auto-detecting endpoints from routing code can be complex and fragile across dif
 func YourHandler(c *gin.Context) { ... }
 ```
 
-**Parameters:**
-- **METHOD**: HTTP method (GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD)
-- **PATH**: Full endpoint path (e.g., `/api/users`, `/api/products/:id`)
-- **StructName**: *(Optional)* Request body struct name for POST/PUT/PATCH
-
 ### Examples
 
 #### GET Endpoint (No Body)
 ```go
+// @gohit GET /api/users
+```
+
+#### POST Endpoint with Struct
+```go
+// @gohit POST /api/users CreateUserRequest
+```
+
+#### Cross-Package Struct
+```go
+// @gohit POST /api/products dto.CreateProductRequest
+```
+
+---
 // @gohit GET /api/users
 func ListUsers(c *gin.Context) {
     // Handler logic

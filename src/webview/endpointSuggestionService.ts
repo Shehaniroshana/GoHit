@@ -42,7 +42,7 @@ export class EndpointSuggestionService {
             // Find all .go files in the workspace
             const goFiles = await vscode.workspace.findFiles(
                 '**/*.go',
-                '**/node_modules/**,**/vendor/**,**/.git/**',
+                '{**/node_modules/**,**/vendor/**,**/.git/**}',
                 1000 // limit to 1000 files
             );
 
@@ -51,8 +51,14 @@ export class EndpointSuggestionService {
             // Parse each file to extract endpoints
             for (const file of goFiles) {
                 try {
-                    const document = await vscode.workspace.openTextDocument(file);
-                    const content = document.getText();
+                    // Use fs.readFile for better performance than openTextDocument
+                    const fileData = await vscode.workspace.fs.readFile(file);
+                    const content = Buffer.from(fileData).toString('utf8');
+                    
+                    if (!content.includes('gin') && !content.includes('fiber') && !content.includes('echo') && !content.includes('http') && !content.includes('@gohit') && !content.includes('Group')) {
+                        continue; // Skip files that definitely don't have routes
+                    }
+
                     const result = this.parser.parse(content, file.fsPath);
 
                     // Parse structs for body examples
@@ -132,33 +138,29 @@ export class EndpointSuggestionService {
                             }
 
                             // Generate JSON if we found a struct name
-                            if (requestStructName) {
-                                // Struct might be in this file OR we might need to find it
-                                let targetStruct = structs.find(s => s.name === requestStructName);
+                                if (requestStructName) {
+                                    let targetStruct: any = structs.find(s => s.name === requestStructName);
+                                    let contextStructs: any[] = structs;
 
-                                // If struct not in current file, search workspace for it
-                                if (!targetStruct) {
-                                    Logger.info(`[STRUCT SEARCH] "${requestStructName}" not found in current file, searching workspace...`);
-                                    targetStruct = await this.findStructInWorkspace(goFiles, requestStructName);
-                                    if (targetStruct) {
-                                        Logger.info(`[STRUCT SEARCH] ✓ Found "${targetStruct.name}" in workspace`);
-                                    } else {
-                                        Logger.warn(`[STRUCT SEARCH] ✗ Could not find struct "${requestStructName}" in workspace`);
+                                    if (!targetStruct) {
+                                        Logger.info(`[STRUCT SEARCH] "${requestStructName}" not found in current file, searching workspace...`);
+                                        const result = await this.findStructInWorkspace(goFiles, requestStructName);
+                                        if (result) {
+                                            targetStruct = result.struct;
+                                            contextStructs = result.context;
+                                            Logger.info(`[STRUCT SEARCH] ✓ Found "${targetStruct.name}" in workspace`);
+                                        } else {
+                                            Logger.warn(`[STRUCT SEARCH] ✗ Could not find struct "${requestStructName}" in workspace`);
+                                        }
                                     }
-                                }
 
-                                if (targetStruct) {
-                                    // We need all structs from the file where targetStruct was found to resolve nested types
-                                    // For simplicity in this heuristic version, we pass the current file's structs 
-                                    // combined with the target struct. 
-                                    // A full implementation would need to parse that external file entirely.
-                                    const contextStructs = [targetStruct, ...structs];
-                                    bodyExample = this.analyzer.generateJSON(targetStruct, contextStructs);
-                                    Logger.info(`✓ Generated body for ${endpoint.method} ${endpoint.path} from ${requestStructName}`);
+                                    if (targetStruct) {
+                                        bodyExample = this.analyzer.generateJSON(targetStruct, contextStructs);
+                                        Logger.info(`✓ Generated body for ${endpoint.method} ${endpoint.path} from ${requestStructName}`);
+                                    } else {
+                                        Logger.warn(`✗ Could not find struct definition for ${requestStructName}`);
+                                    }
                                 } else {
-                                    Logger.warn(`✗ Could not find struct definition for ${requestStructName}`);
-                                }
-                            } else {
                                 Logger.debug(`✗ No struct found for ${endpoint.method} ${endpoint.path}`);
                             }
                         }
@@ -279,9 +281,9 @@ export class EndpointSuggestionService {
     }
 
     /**
-     * Find a struct definition by name in the workspace
+     * Search for a struct definition by name in the workspace
      */
-    private async findStructInWorkspace(files: vscode.Uri[], structName: string): Promise<any | null> {
+    private async findStructInWorkspace(files: vscode.Uri[], structName: string): Promise<{ struct: any, context: any[] } | null> {
         // Strip package prefix if present (e.g. "models.CreateRequest" -> "CreateRequest")
         const cleanStructName = structName.includes('.') ? structName.split('.').pop()! : structName;
 
@@ -291,8 +293,8 @@ export class EndpointSuggestionService {
 
         for (const file of files) {
             try {
-                const document = await vscode.workspace.openTextDocument(file);
-                const content = document.getText();
+                const fileData = await vscode.workspace.fs.readFile(file);
+                const content = Buffer.from(fileData).toString('utf8');
 
                 if (structRegex.test(content)) {
                     Logger.debug(`[findStructInWorkspace] ✓ Found regex match in ${file.fsPath}`);
@@ -300,7 +302,7 @@ export class EndpointSuggestionService {
                     const found = structs.find(s => s.name === cleanStructName);
                     if (found) {
                         Logger.info(`[findStructInWorkspace] ✓ Successfully parsed struct: ${found.name}`);
-                        return found;
+                        return { struct: found, context: structs };
                     }
                 }
             } catch (e) {
@@ -317,8 +319,9 @@ export class EndpointSuggestionService {
      */
     private findRequestStructInHandler(content: string, handlerName: string): string | null {
         try {
-            // Find function definition: func handlerName(...) {
-            const funcRegex = new RegExp(`func\\s+${handlerName}\\s*\\([^)]*\\)\\s*{`, 'm');
+            // Find function definition: func (recv) handlerName(...) { OR func handlerName(...) {
+            // This regex now supports receivers and multi-line signatures (basic)
+            const funcRegex = new RegExp(`func\\s+(?:\\([^)]+\\)\\s+)?${handlerName}\\s*\\(`, 'm');
             const funcMatch = content.match(funcRegex);
 
             if (!funcMatch || funcMatch.index === undefined) {

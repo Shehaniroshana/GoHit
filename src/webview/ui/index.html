@@ -87,6 +87,7 @@
         <div class="req-tabs">
           <button class="req-tab active" data-target="req-body">Body</button>
           <button class="req-tab" data-target="req-headers">Headers</button>
+          <button class="req-tab" data-target="req-auth">Auth</button>
         </div>
 
         <!-- Request Body -->
@@ -103,9 +104,53 @@
           <button class="btn-secondary" style="margin-top:12px; width:100%" onclick="addHeader()">+ Add Header</button>
         </div>
 
-        <button class="btn-glow" id="send-btn" onclick="sendRequest()" style="margin-top: 10px;">SEND REQUEST</button>
+        <!-- Request Auth -->
+        <div id="req-auth" class="req-content">
+          <div class="col" style="gap:12px;">
+            <span class="lbl">Auth Type</span>
+            <select id="auth-type" class="glass-input" onchange="updateAuthUI()">
+              <option value="none">No Auth</option>
+              <option value="bearer">Bearer Token</option>
+              <option value="apikey">API Key</option>
+            </select>
 
-        <div id="response-section" class="glass-card col hidden">
+            <div id="auth-bearer-config" class="col hidden" style="gap:8px;">
+              <span class="lbl">Token</span>
+              <input type="text" id="auth-token" class="glass-input" placeholder="eyJhbGciOiJIUzI1..." />
+            </div>
+
+            <div id="auth-apikey-config" class="col hidden" style="gap:8px;">
+              <span class="lbl">Key</span>
+              <input type="text" id="auth-key-name" class="glass-input" placeholder="X-API-Key" />
+              <span class="lbl">Value</span>
+              <input type="text" id="auth-key-value" class="glass-input" placeholder="your-api-key-here" />
+            </div>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top: 10px; gap: 8px;">
+          <button class="btn-glow" id="send-btn" onclick="sendRequest()" style="flex: 1; margin: 0;">SEND REQUEST</button>
+          <button class="icon-btn-small" onclick="copyAsCurl()" title="Copy as cURL" style="width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center; background: var(--glass-bg);">
+            <svg width="16" height="16" fill="var(--text-secondary)" viewBox="0 0 16 16"><path d="M5 3a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H5zm0 1h7a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M4 1.5a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7a.5.5 0 0 1-.5-.5z"/></svg>
+          </button>
+        </div>
+
+        <!-- WebSocket Terminal (Conditional) -->
+        <div id="ws-section" class="glass-card col hidden" style="margin-top: 10px; flex-grow: 1; min-height: 200px;">
+          <div class="res-header">
+            <span id="ws-status-text" style="font-weight:700">WS DISCONNECTED</span>
+            <button class="icon-btn-small" onclick="closeWS()" title="Close Connection">✕</button>
+          </div>
+          <div id="ws-messages" class="response-box" style="flex-grow:1; max-height: 300px; overflow-y: auto;">
+            <!-- WS Messages go here -->
+          </div>
+          <div class="row" style="margin-top: 8px; gap: 8px;">
+            <input type="text" id="ws-input" class="glass-input" style="flex-grow:1" placeholder="Send a message..." onkeyup="if(event.key==='Enter') sendWSMessage()">
+            <button class="btn-glow" style="width: auto; padding: 0 16px; margin:0;" onclick="sendWSMessage()">SEND</button>
+          </div>
+        </div>
+
+        <div id="response-section" class="glass-card col hidden" style="margin-top: 10px;">
           <div class="res-header">
             <span id="status-code" style="font-weight:700"></span>
             <span id="response-time"></span>

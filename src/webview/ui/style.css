@@ -374,3 +374,35 @@ body {
 .col { display: flex; flex-direction: column; gap: 8px; }
 .mt-3 { margin-top: 16px; }
 .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-secondary); margin-bottom: 4px; display: block; }
+
+/* --- WebSocket Log --- */
+.ws-log {
+  margin-bottom: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.02);
+}
+.ws-log.sent { color: #34d399; }
+.ws-log.received { color: #3b82f6; }
+.ws-log.info { color: #a1a1aa; border-left: 2px solid #a1a1aa; }
+.ws-log.error { color: #f87171; border-left: 2px solid #f87171; }
+
+.ws-time { color: var(--text-secondary); font-size: 9px; margin-right: 6px; }
+.ws-type { font-weight: 800; font-size: 9px; margin-right: 6px; text-transform: uppercase; }
+.ws-content { margin-top: 2px; white-space: pre-wrap; word-break: break-all; }
+
+/* Auth Tab Styles */
+#req-auth .lbl {
+  margin-top: 10px;
+  margin-bottom: 4px;
+}
+
+#req-auth select.glass-input {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='rgba(255,255,255,0.5)' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}

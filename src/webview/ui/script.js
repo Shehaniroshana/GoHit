@@ -14,6 +14,18 @@ const responseTimeEl = document.getElementById('response-time');
 const responseBodyEl = document.getElementById('response-body');
 const errorContainer = document.getElementById('error-container');
 
+window.updateAuthUI = function() {
+  const type = document.getElementById('auth-type').value;
+  document.getElementById('auth-bearer-config').classList.add('hidden');
+  document.getElementById('auth-apikey-config').classList.add('hidden');
+  
+  if (type === 'bearer') {
+    document.getElementById('auth-bearer-config').classList.remove('hidden');
+  } else if (type === 'apikey') {
+    document.getElementById('auth-apikey-config').classList.remove('hidden');
+  }
+};
+
 // State
 let allSuggestions = [];
 
@@ -78,7 +90,13 @@ window.selectSidebarItem = function(index) {
   methodSelect.value = suggestion.method;
   updateMethodColor();
   urlInput.value = suggestion.path;
-  bodyInput.value = '';
+  
+  if (suggestion.bodyExample) {
+    bodyInput.value = JSON.stringify(suggestion.bodyExample, null, 2);
+  } else {
+    bodyInput.value = '';
+  }
+  
   switchTab('tab-tester');
 };
 
@@ -122,6 +140,17 @@ window.sendRequest = function() {
   const url = urlInput.value;
   const headers = getHeaders();
   
+  // Add Auth headers
+  const authType = document.getElementById('auth-type').value;
+  if (authType === 'bearer') {
+    const token = document.getElementById('auth-token').value.trim();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+  } else if (authType === 'apikey') {
+    const key = document.getElementById('auth-key-name').value.trim();
+    const val = document.getElementById('auth-key-value').value.trim();
+    if (key && val) headers[key] = val;
+  }
+  
   let body;
   try {
     const txt = bodyInput.value.trim();
@@ -136,7 +165,17 @@ window.sendRequest = function() {
   sendBtn.innerHTML = 'SENDING...';
   sendBtn.disabled = true;
   
-  responseSection.classList.add('hidden');
+  const isWS = method === 'WS';
+  
+  if (isWS) {
+    document.getElementById('ws-section').classList.remove('hidden');
+    responseSection.classList.add('hidden');
+    document.getElementById('ws-messages').innerHTML = '<div class="ws-log info">Connecting...</div>';
+  } else {
+    document.getElementById('ws-section').classList.add('hidden');
+    responseSection.classList.add('hidden');
+  }
+
   errorContainer.classList.add('hidden');
   
   vscode.postMessage({
@@ -144,6 +183,79 @@ window.sendRequest = function() {
     data: { method, url, baseUrl: baseUrlInput.value.trim(), headers, body }
   });
 };
+
+window.sendWSMessage = function() {
+  const input = document.getElementById('ws-input');
+  const msg = input.value.trim();
+  if (msg) {
+    vscode.postMessage({ type: 'wsSend', data: msg });
+    addWSLog('sent', msg);
+    input.value = '';
+  }
+};
+
+window.copyAsCurl = function() {
+  const method = methodSelect.value;
+  const url = urlInput.value;
+  const baseUrl = baseUrlInput.value.trim();
+  const fullUrl = baseUrl ? (baseUrl.endsWith('/') ? baseUrl + (url.startsWith('/') ? url.slice(1) : url) : baseUrl + (url.startsWith('/') ? url : '/' + url)) : url;
+  const headers = getHeaders();
+  
+  // Add Auth headers
+  const authType = document.getElementById('auth-type').value;
+  if (authType === 'bearer') {
+    const token = document.getElementById('auth-token').value.trim();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+  } else if (authType === 'apikey') {
+    const key = document.getElementById('auth-key-name').value.trim();
+    const val = document.getElementById('auth-key-value').value.trim();
+    if (key && val) headers[key] = val;
+  }
+
+  let curl = `curl -X ${method} "${fullUrl}"`;
+  for (const [k, v] of Object.entries(headers)) {
+    curl += ` \\\n  -H "${k}: ${v}"`;
+  }
+  
+  const body = bodyInput.value.trim();
+  if (body && !['GET', 'HEAD', 'WS'].includes(method)) {
+    curl += ` \\\n  -d '${body}'`;
+  }
+  
+  navigator.clipboard.writeText(curl).then(() => {
+    vscode.postMessage({ type: 'info', data: 'cURL copied to clipboard!' });
+  });
+};
+
+window.closeWS = function() {
+  vscode.postMessage({ type: 'wsClose' });
+};
+
+function addWSLog(type, content) {
+  const container = document.getElementById('ws-messages');
+  const time = new Date().toLocaleTimeString();
+  const entry = document.createElement('div');
+  entry.className = `ws-log ${type}`;
+  
+  const timeSpan = document.createElement('span');
+  timeSpan.className = 'ws-time';
+  timeSpan.textContent = `[${time}]`;
+  
+  const typeSpan = document.createElement('span');
+  typeSpan.className = 'ws-type';
+  typeSpan.textContent = type.toUpperCase();
+  
+  const contentDiv = document.createElement('div');
+  contentDiv.className = 'ws-content';
+  contentDiv.textContent = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+  
+  entry.appendChild(timeSpan);
+  entry.appendChild(typeSpan);
+  entry.appendChild(contentDiv);
+  
+  container.appendChild(entry);
+  container.scrollTop = container.scrollHeight;
+}
 
 function showError(msg) {
   errorContainer.textContent = msg;
@@ -178,11 +290,13 @@ window.generateAIBody = function() {
   const url = urlInput.value;
   if (!url || url.trim() === '') return;
   
+  const currentBody = bodyInput.value.trim();
+  
   const btn = document.getElementById('ai-generate-btn');
   btn.dataset.oHtml = btn.innerHTML;
   btn.innerHTML = '✨ Generating...';
   
-  vscode.postMessage({ type: 'generateAIBody', data: { method, url } });
+  vscode.postMessage({ type: 'generateAIBody', data: { method, url, currentBody } });
 };
 
 window.fetchModels = function() {
@@ -237,6 +351,31 @@ window.addEventListener('message', e => {
     }
     responseBodyEl.textContent = displayData;
   }
+
+  if (msg.type === 'wsStatus') {
+    const { status, url, message, code, reason } = msg.data;
+    const statusEl = document.getElementById('ws-status-text');
+    statusEl.textContent = `WS ${status}`;
+    
+    if (status === 'CONNECTED') {
+      statusEl.style.color = 'var(--neon-cyan)';
+      addWSLog('info', `Connected to ${url}`);
+      if (sendBtn.dataset.oHtml) sendBtn.innerHTML = sendBtn.dataset.oHtml;
+      sendBtn.disabled = false;
+    } else if (status === 'CLOSED') {
+      statusEl.style.color = 'var(--text-secondary)';
+      addWSLog('info', `Connection closed: ${code} ${reason || ''}`);
+    } else if (status === 'ERROR') {
+      statusEl.style.color = 'var(--neon-pink)';
+      addWSLog('error', message);
+      if (sendBtn.dataset.oHtml) sendBtn.innerHTML = sendBtn.dataset.oHtml;
+      sendBtn.disabled = false;
+    }
+  }
+
+  if (msg.type === 'wsMessage') {
+    addWSLog('received', msg.data.content);
+  }
   
   if (msg.type === 'modelsList') {
     const select = document.getElementById('ai-model');
@@ -287,7 +426,7 @@ window.addEventListener('message', e => {
     const btn = document.getElementById('ai-generate-btn');
     if (btn.dataset.oHtml) btn.innerHTML = btn.dataset.oHtml;
     
-    if (msg.data.error) alert("AI Error: " + msg.data.error);
+    if (msg.data.error) vscode.postMessage({ type: 'error', data: msg.data.error });
     else if (msg.data.body) bodyInput.value = JSON.stringify(msg.data.body, null, 2);
   }
 });

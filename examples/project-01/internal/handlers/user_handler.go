@@ -15,7 +15,7 @@ func NewUserHandler() *UserHandler {
 	return &UserHandler{}
 }
 
-// @gohit POST /api/v1/users dto.CreateUserRequest
+// @gohit POST /gin/api/v1/users dto.CreateUserRequest
 func (h *UserHandler) CreateUser(c *gin.Context) {
 	var req dto.CreateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -34,7 +34,7 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 	c.JSON(http.StatusCreated, resp)
 }
 
-// @gohit GET /api/v1/users
+// @gohit GET /gin/api/v1/users
 func (h *UserHandler) ListUsers(c *gin.Context) {
 	// Mock data
 	users := []dto.UserResponse{
@@ -44,7 +44,7 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"users": users})
 }
 
-// @gohit GET /api/v1/users/:id
+// @gohit GET /gin/api/v1/users/:id
 func (h *UserHandler) GetUser(c *gin.Context) {
 	id := c.Param("id")
 
@@ -59,7 +59,7 @@ func (h *UserHandler) GetUser(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"id": id, "user": user})
 }
 
-// @gohit PUT /api/v1/users/:id dto.UpdateUserRequest
+// @gohit PUT /gin/api/v1/users/:id dto.UpdateUserRequest
 func (h *UserHandler) UpdateUser(c *gin.Context) {
 	id := c.Param("id")
 
@@ -80,7 +80,7 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"id": id, "user": resp})
 }
 
-// @gohit DELETE /api/v1/users/:id
+// @gohit DELETE /gin/api/v1/users/:id
 func (h *UserHandler) DeleteUser(c *gin.Context) {
 	id := c.Param("id")
 	c.JSON(http.StatusOK, gin.H{"message": "User deleted", "id": id})

@@ -15,7 +15,7 @@ func NewProductHandler() *ProductHandler {
 	return &ProductHandler{}
 }
 
-// @gohit POST /api/v1/products dto.CreateProductRequest
+// @gohit POST /gin/api/v1/products dto.CreateProductRequest
 func (h *ProductHandler) CreateProduct(c *gin.Context) {
 	var req dto.CreateProductRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -35,7 +35,7 @@ func (h *ProductHandler) CreateProduct(c *gin.Context) {
 	c.JSON(http.StatusCreated, resp)
 }
 
-// @gohit GET /api/v1/products
+// @gohit GET /gin/api/v1/products
 func (h *ProductHandler) ListProducts(c *gin.Context) {
 	products := []dto.ProductResponse{
 		{ID: 1, Name: "Laptop", Price: 999.99, Stock: 50, CategoryID: 1},
@@ -44,7 +44,7 @@ func (h *ProductHandler) ListProducts(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"products": products})
 }
 
-// @gohit GET /api/v1/products/:id
+// @gohit GET /gin/api/v1/products/:id
 func (h *ProductHandler) GetProduct(c *gin.Context) {
 	id := c.Param("id")
 
@@ -60,7 +60,7 @@ func (h *ProductHandler) GetProduct(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"id": id, "product": product})
 }
 
-// @gohit PUT /api/v1/products/:id dto.UpdateProductRequest
+// @gohit PUT /gin/api/v1/products/:id dto.UpdateProductRequest
 func (h *ProductHandler) UpdateProduct(c *gin.Context) {
 	id := c.Param("id")
 
@@ -82,7 +82,7 @@ func (h *ProductHandler) UpdateProduct(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"id": id, "product": resp})
 }
 
-// @gohit DELETE /api/v1/products/:id
+// @gohit DELETE /gin/api/v1/products/:id
 func (h *ProductHandler) DeleteProduct(c *gin.Context) {
 	id := c.Param("id")
 	c.JSON(http.StatusOK, gin.H{"message": "Product deleted", "id": id})

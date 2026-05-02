@@ -4,7 +4,7 @@ export interface HttpRequest {
     url: string;
     method: string;
     headers?: Record<string, string>;
-    body?: string;
+    body?: any;
 }
 
 export interface HttpResponse {
@@ -30,14 +30,23 @@ export class HttpClient {
             };
 
             if (request.body && ['POST', 'PUT', 'PATCH'].includes(request.method.toUpperCase())) {
-                try {
-                    config.data = JSON.parse(request.body);
-                    if (!config.headers) {
-                        config.headers = {};
+                if (typeof request.body === 'string') {
+                    try {
+                        config.data = JSON.parse(request.body);
+                    } catch {
+                        config.data = request.body;
                     }
-                    config.headers['Content-Type'] = 'application/json';
-                } catch {
+                } else {
                     config.data = request.body;
+                }
+
+                if (!config.headers) {
+                    config.headers = {};
+                }
+                
+                // Only set application/json if we managed to parse it or it was an object
+                if (typeof config.data === 'object') {
+                    config.headers['Content-Type'] = 'application/json';
                 }
             }
 

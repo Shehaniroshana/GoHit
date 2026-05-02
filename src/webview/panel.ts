@@ -16,6 +16,7 @@ export class GoHitViewProvider implements vscode.WebviewViewProvider {
     private httpClient: HttpClient;
     private currentEndpoint: EndpointInfo | null = null;
     private suggestionService: EndpointSuggestionService;
+    private activeWs: WebSocket | null = null;
 
     constructor(private context: vscode.ExtensionContext) {
         this.envManager = new EnvironmentManager();
@@ -127,6 +128,27 @@ export class GoHitViewProvider implements vscode.WebviewViewProvider {
                     vscode.window.showErrorMessage(e.message);
                 }
                 break;
+
+            case 'wsSend':
+                if (this.activeWs && this.activeWs.readyState === WebSocket.OPEN) {
+                    this.activeWs.send(message.data);
+                }
+                break;
+
+            case 'wsClose':
+                if (this.activeWs) {
+                    this.activeWs.close();
+                    this.activeWs = null;
+                }
+                break;
+
+            case 'error':
+                vscode.window.showErrorMessage(message.data);
+                break;
+
+            case 'info':
+                vscode.window.showInformationMessage(message.data);
+                break;
         }
     }
 
@@ -186,78 +208,61 @@ export class GoHitViewProvider implements vscode.WebviewViewProvider {
 
         if (data.method === 'WS') {
             try {
+                if (this.activeWs) {
+                    this.activeWs.close();
+                }
+
                 let wsUrl = fullUrl;
                 if (wsUrl.startsWith('http://')) wsUrl = wsUrl.replace('http://', 'ws://');
                 if (wsUrl.startsWith('https://')) wsUrl = wsUrl.replace('https://', 'wss://');
                 if (!wsUrl.startsWith('ws')) wsUrl = 'ws://' + wsUrl;
 
-                const ws = new WebSocket(wsUrl);
+                this.activeWs = new WebSocket(wsUrl);
+                const ws = this.activeWs;
                 
                 ws.on('open', () => {
+                    this._view?.webview.postMessage({
+                        type: 'wsStatus',
+                        data: { status: 'CONNECTED', url: wsUrl }
+                    });
+
                     if (data.body) {
                         ws.send(typeof data.body === 'string' ? data.body : JSON.stringify(data.body));
-                    } else {
-                        ws.send('ping');
                     }
                 });
 
                 ws.on('message', (message: any) => {
-                    const time = Date.now() - startTime;
                     this._view?.webview.postMessage({
-                        type: 'response',
+                        type: 'wsMessage',
                         data: {
-                            status: 'WS',
-                            statusText: 'Message Received',
-                            headers: {},
-                            data: message.toString(),
-                            time
+                            type: 'received',
+                            content: message.toString(),
+                            time: Date.now()
                         }
                     });
-                    ws.close();
+                });
+
+                ws.on('close', (code, reason) => {
+                    this._view?.webview.postMessage({
+                        type: 'wsStatus',
+                        data: { status: 'CLOSED', code, reason: reason.toString() }
+                    });
+                    if (this.activeWs === ws) {
+                        this.activeWs = null;
+                    }
                 });
 
                 ws.on('error', (err: any) => {
-                    const time = Date.now() - startTime;
                     this._view?.webview.postMessage({
-                        type: 'response',
-                        data: {
-                            status: 'ERROR',
-                            statusText: 'Connection Failed',
-                            headers: {},
-                            data: err.message,
-                            time
-                        }
+                        type: 'wsStatus',
+                        data: { status: 'ERROR', message: err.message }
                     });
                 });
 
-                setTimeout(() => {
-                    if (ws.readyState === WebSocket.OPEN) {
-                        ws.close();
-                        const time = Date.now() - startTime;
-                        this._view?.webview.postMessage({
-                            type: 'response',
-                            data: {
-                                status: 'WS',
-                                statusText: 'Connection Closed (Timeout)',
-                                headers: {},
-                                data: 'No response received within 5 seconds.',
-                                time
-                            }
-                        });
-                    }
-                }, 5000);
-
             } catch (error: any) {
-                const time = Date.now() - startTime;
                 this._view?.webview.postMessage({
-                    type: 'response',
-                    data: {
-                        status: 'ERROR',
-                        statusText: 'WebSocket Error',
-                        headers: {},
-                        data: error.message,
-                        time
-                    }
+                    type: 'wsStatus',
+                    data: { status: 'ERROR', message: error.message }
                 });
             }
             return;
@@ -346,7 +351,7 @@ export class GoHitViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private async handleGenerateAIBody(data: { method: string, url: string }) {
+    private async handleGenerateAIBody(data: { method: string, url: string, currentBody?: string }) {
         const config = vscode.workspace.getConfiguration('gohit');
         const apiKey = config.get<string>('openRouterApiKey');
         const aiModel = config.get<string>('openRouterAiModel') || 'anthropic/claude-3-haiku';
@@ -363,8 +368,20 @@ export class GoHitViewProvider implements vscode.WebviewViewProvider {
 
         Logger.info(`Generating AI body for ${data.method} ${data.url}`);
 
+        // Try to find local body example for context
+        const suggestions = this.suggestionService.getAllEndpoints();
+        const match = suggestions.find(s => s.path === data.url && s.method === data.method);
+        let contextInfo = '';
+        if (match && match.bodyExample) {
+            contextInfo = `\n\nHere is a template based on the Go struct for this endpoint:\n${JSON.stringify(match.bodyExample, null, 2)}`;
+        }
+
+        if (data.currentBody && data.currentBody !== '{}' && data.currentBody !== '[]') {
+            contextInfo += `\n\nHere is the current body the user has (improve/vary this): \n${data.currentBody}`;
+        }
+
         let systemPrompt = `You are a helpful assistant that generates JSON request bodies for API testing.
-You are generating a request for a ${data.method} request to ${data.url}.
+You are generating a request for a ${data.method} request to ${data.url}.${contextInfo}
 ONLY return valid JSON. Do not include markdown formatting or explanations.`;
 
         if (aiPrompt) {
@@ -395,11 +412,14 @@ ONLY return valid JSON. Do not include markdown formatting or explanations.`;
             let jsonBody;
             try {
                 let cleanContent = rawContent;
-                if (cleanContent.startsWith('\`\`\`json')) {
-                    cleanContent = cleanContent.replace(/^\`\`\`json\\s*/, '').replace(/\\s*\`\`\`$/, '');
-                } else if (cleanContent.startsWith('\`\`\`')) {
-                    cleanContent = cleanContent.replace(/^\`\`\`\\s*/, '').replace(/\\s*\`\`\`$/, '');
+                // More robust extraction: find the first { and last }
+                const startIdx = cleanContent.indexOf('{');
+                const endIdx = cleanContent.lastIndexOf('}');
+                
+                if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+                    cleanContent = cleanContent.substring(startIdx, endIdx + 1);
                 }
+                
                 jsonBody = JSON.parse(cleanContent);
             } catch (e) {
                 Logger.error('Failed to parse AI response as JSON', e);
