@@ -50,6 +50,7 @@ GoHit automatically scans your workspace to identify endpoints across multiple f
 - **Gin** (including nested group structures)
 - **Fiber** (including v2 and PascalCase methods)
 - **Echo** (full route tree extraction)
+- **Chi** (standard routing and groups)
 
 ### Modern User Interface
 A clean, integrated interface designed for efficient development:
@@ -394,6 +395,16 @@ e.GET("/api/users", getUsers)
 e.POST("/api/users", createUser)
 e.PUT("/api/users/:id", updateUser)
 e.DELETE("/api/users/:id", deleteUser)
+```
+
+### Chi
+
+```go
+r := chi.NewRouter()
+r.Get("/api/users", getUsers)
+r.Post("/api/users", createUser)
+r.Put("/api/users/{id}", updateUser)
+r.Delete("/api/users/{id}", deleteUser)
 ```
 
 ---

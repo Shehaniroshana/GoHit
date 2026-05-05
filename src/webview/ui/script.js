@@ -55,12 +55,9 @@ document.querySelectorAll('.req-tab').forEach(btn => {
 });
 
 window.refreshEndpoints = function() {
+  const btn = document.getElementById('refresh-btn');
+  if (btn) btn.classList.add('spinning');
   vscode.postMessage({ type: 'refreshEndpoints' });
-  const btn = document.querySelector('.icon-btn-small');
-  if (btn) {
-    btn.classList.add('spinning');
-    setTimeout(() => btn.classList.remove('spinning'), 1000);
-  }
 };
 
 // --- Endpoints ---
@@ -91,13 +88,62 @@ window.selectSidebarItem = function(index) {
   updateMethodColor();
   urlInput.value = suggestion.path;
   
+  // Handle Params
+  const paramsContainer = document.getElementById('params-container');
+  if (suggestion.params && suggestion.params.length > 0) {
+    paramsContainer.innerHTML = suggestion.params.map(p => `
+      <div class="row" style="align-items:center;">
+        <span class="lbl" style="width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${p}">${p}</span>
+        <input type="text" class="glass-input param-input" data-param="${p}" placeholder="value" style="flex:1" value="1">
+      </div>
+    `).join('');
+    document.getElementById('tab-btn-params').classList.add('has-params');
+    // If it has params, show them first
+    document.querySelector('.req-tab[data-target="req-params"]').click();
+  } else {
+    paramsContainer.innerHTML = `<div style="text-align:center; padding: 20px; color: var(--text-secondary); font-size:11px;">No path parameters detected</div>`;
+    document.getElementById('tab-btn-params').classList.remove('has-params');
+    document.querySelector('.req-tab[data-target="req-body"]').click();
+  }
+
   if (suggestion.bodyExample) {
     bodyInput.value = JSON.stringify(suggestion.bodyExample, null, 2);
   } else {
     bodyInput.value = '';
   }
+
+  // Handle Field Suggestions
+  const fieldContainer = document.getElementById('field-suggestions-container');
+  const fieldList = document.getElementById('field-suggestions');
+  if (suggestion.fields && suggestion.fields.length > 0) {
+    fieldContainer.classList.remove('hidden');
+    fieldList.innerHTML = suggestion.fields.map(f => `
+      <button class="btn-secondary" style="font-size:10px; padding: 4px 8px;" onclick="insertField('${f}')">${f}</button>
+    `).join('');
+    document.getElementById('body-struct-name').textContent = 'DETECTED STRUCT';
+  } else {
+    fieldContainer.classList.add('hidden');
+    document.getElementById('body-struct-name').textContent = 'RAW JSON';
+  }
   
   switchTab('tab-tester');
+};
+
+window.insertField = function(field) {
+  const currentBody = bodyInput.value.trim();
+  let bodyObj = {};
+  try {
+    if (currentBody && currentBody !== '{}') {
+      bodyObj = JSON.parse(currentBody);
+    }
+    if (!bodyObj[field]) {
+      bodyObj[field] = "";
+      bodyInput.value = JSON.stringify(bodyObj, null, 2);
+    }
+  } catch (e) {
+    // If not valid JSON, just append
+    bodyInput.value += `\n"${field}": ""`;
+  }
 };
 
 document.getElementById('sidebar-search').addEventListener('input', (e) => {
@@ -137,8 +183,16 @@ function getHeaders() {
 // --- Request ---
 window.sendRequest = function() {
   const method = methodSelect.value;
-  const url = urlInput.value;
+  let url = urlInput.value;
   const headers = getHeaders();
+
+  // Replace path parameters
+  document.querySelectorAll('.param-input').forEach(input => {
+    const p = input.dataset.param;
+    const v = input.value.trim() || `:${p}`;
+    url = url.replace(`:${p}`, v);
+    url = url.replace(`{${p}}`, v);
+  });
   
   // Add Auth headers
   const authType = document.getElementById('auth-type').value;
@@ -151,13 +205,15 @@ window.sendRequest = function() {
     if (key && val) headers[key] = val;
   }
   
-  let body;
-  try {
-    const txt = bodyInput.value.trim();
-    body = txt ? JSON.parse(txt) : undefined;
-  } catch (e) {
-    showError('Invalid JSON in Request Body');
-    return;
+  let body = undefined;
+  const txt = bodyInput.value.trim();
+  if (txt) {
+    try {
+      body = JSON.parse(txt);
+    } catch (e) {
+      // If it's not valid JSON, send it as-is (might be plain text or raw data)
+      body = txt;
+    }
   }
   
   const oHtml = sendBtn.innerHTML;
@@ -196,7 +252,16 @@ window.sendWSMessage = function() {
 
 window.copyAsCurl = function() {
   const method = methodSelect.value;
-  const url = urlInput.value;
+  let url = urlInput.value;
+  
+  // Replace path parameters
+  document.querySelectorAll('.param-input').forEach(input => {
+    const p = input.dataset.param;
+    const v = input.value.trim() || `:${p}`;
+    url = url.replace(`:${p}`, v);
+    url = url.replace(`{${p}}`, v);
+  });
+
   const baseUrl = baseUrlInput.value.trim();
   const fullUrl = baseUrl ? (baseUrl.endsWith('/') ? baseUrl + (url.startsWith('/') ? url.slice(1) : url) : baseUrl + (url.startsWith('/') ? url : '/' + url)) : url;
   const headers = getHeaders();
@@ -299,6 +364,25 @@ window.generateAIBody = function() {
   vscode.postMessage({ type: 'generateAIBody', data: { method, url, currentBody } });
 };
 
+window.generateAIParams = function() {
+  const method = methodSelect.value;
+  const url = urlInput.value;
+  if (!url || url.trim() === '') return;
+  
+  const params = [];
+  document.querySelectorAll('.param-input').forEach(input => {
+    params.push(input.dataset.param);
+  });
+  
+  if (params.length === 0) return;
+
+  const btn = document.getElementById('ai-params-btn');
+  btn.dataset.oHtml = btn.innerHTML;
+  btn.innerHTML = '✨ Generating...';
+  
+  vscode.postMessage({ type: 'generateAIParams', data: { method, url, params } });
+};
+
 window.fetchModels = function() {
   vscode.postMessage({ type: 'fetchModels' });
   document.getElementById('ai-model').innerHTML = '<option value="">Fetching models...</option>';
@@ -324,6 +408,13 @@ window.addEventListener('message', e => {
   
   if (msg.type === 'suggestions') {
     allSuggestions = msg.data || [];
+    const btn = document.getElementById('refresh-btn');
+    if (btn) btn.classList.remove('spinning');
+    
+    // Update count badge
+    const countBadge = document.getElementById('endpoint-count');
+    if (countBadge) countBadge.textContent = allSuggestions.length;
+    
     populateSidebar(allSuggestions);
   }
   
@@ -340,16 +431,26 @@ window.addEventListener('message', e => {
     errorContainer.classList.add('hidden');
     responseSection.classList.remove('hidden');
     
-    const { status, statusText, data, time } = msg.data;
-    statusCodeEl.textContent = `${status} ${statusText}`;
-    statusCodeEl.className = status >= 400 || status === 'ERROR' ? 'status-red' : 'status-green';
-    responseTimeEl.textContent = `${time}ms`;
+    const { status, statusText, data, time, error } = msg.data;
     
-    let displayData = data;
-    if (typeof data === 'object') {
-      displayData = JSON.stringify(data, null, 2);
+    if (status === 0 || error) {
+      statusCodeEl.textContent = status === 0 ? 'CONNECTION FAILED' : `${status} ${statusText}`;
+      statusCodeEl.className = 'status-red';
+      responseTimeEl.textContent = `${time}ms`;
+      responseBodyEl.textContent = error || 'An unknown error occurred during the request.';
+      responseBodyEl.style.color = '#f87171'; // Error red
+    } else {
+      statusCodeEl.textContent = `${status} ${statusText}`;
+      statusCodeEl.className = status >= 400 ? 'status-red' : 'status-green';
+      responseTimeEl.textContent = `${time}ms`;
+      
+      let displayData = data;
+      if (typeof data === 'object') {
+        displayData = JSON.stringify(data, null, 2);
+      }
+      responseBodyEl.textContent = displayData;
+      responseBodyEl.style.color = ''; // Reset to default
     }
-    responseBodyEl.textContent = displayData;
   }
 
   if (msg.type === 'wsStatus') {
@@ -415,11 +516,16 @@ window.addEventListener('message', e => {
       if (sel.querySelector(`option[value="${msg.data.aiModel}"]`)) {
         sel.value = msg.data.aiModel;
       } else if (!sel.innerHTML.includes('Fetching')) {
-        sel.innerHTML += `<option value="${msg.data.aiModel}">${msg.data.aiModel}</option>`;
+        const opt = document.createElement('option');
+        opt.value = msg.data.aiModel;
+        opt.textContent = msg.data.aiModel;
+        sel.appendChild(opt);
         sel.value = msg.data.aiModel;
       }
     }
-    if (msg.data.aiPrompt) document.getElementById('ai-prompt').value = msg.data.aiPrompt;
+    if (msg.data.aiPrompt !== undefined) {
+      document.getElementById('ai-prompt').value = msg.data.aiPrompt;
+    }
   }
   
   if (msg.type === 'aiBodyGenerated') {
@@ -428,6 +534,19 @@ window.addEventListener('message', e => {
     
     if (msg.data.error) vscode.postMessage({ type: 'error', data: msg.data.error });
     else if (msg.data.body) bodyInput.value = JSON.stringify(msg.data.body, null, 2);
+  }
+
+  if (msg.type === 'aiParamsGenerated') {
+    const btn = document.getElementById('ai-params-btn');
+    if (btn.dataset.oHtml) btn.innerHTML = btn.dataset.oHtml;
+    
+    if (msg.data.error) vscode.postMessage({ type: 'error', data: msg.data.error });
+    else if (msg.data.params) {
+      for (const [key, val] of Object.entries(msg.data.params)) {
+        const input = document.querySelector(`.param-input[data-param="${key}"]`);
+        if (input) input.value = val;
+      }
+    }
   }
 });
 

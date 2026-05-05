@@ -29,6 +29,7 @@ GoHit automatically identifies API endpoints across your entire workspace, suppo
 - **Gin** - Nested group and method detection
 - **Fiber** - Support for v2 groups and PascalCase methods
 - **Echo** - Context-aware route extraction
+- **Chi** - Standard routing and groups
 - **net/http** - Standard library handler detection
 - **WebSockets** - Integrated terminal with real-time logging
 
@@ -116,7 +117,7 @@ func CreateUser(c *gin.Context) {
 
 ## 🗺️ Roadmap
 
-- [x] Zero-config framework detection (Gin, Fiber, Echo)
+- [x] Zero-config framework detection (Gin, Fiber, Echo, Chi)
 - [x] WebSocket testing terminal
 - [x] Advanced Auth (Bearer & API Key)
 - [x] "Copy as cURL" support
@@ -148,7 +149,7 @@ Built with ❤️ for the Go community
 Special thanks to:
 - VS Code Extension API team
 - The Go programming language team
-- All framework maintainers (Gin, Fiber, Echo)
+- All framework maintainers (Gin, Fiber, Echo, Chi)
 
 ---
 

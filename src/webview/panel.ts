@@ -18,13 +18,15 @@ export class GoHitViewProvider implements vscode.WebviewViewProvider {
     private suggestionService: EndpointSuggestionService;
     private activeWs: WebSocket | null = null;
 
+    private collectionPromise: Promise<any>;
+
     constructor(private context: vscode.ExtensionContext) {
         this.envManager = new EnvironmentManager();
         this.httpClient = new HttpClient();
         this.suggestionService = new EndpointSuggestionService();
 
-        // Collect endpoints in background
-        this.suggestionService.collectEndpoints().catch(err => {
+        // Start collecting endpoints and store the promise
+        this.collectionPromise = this.suggestionService.collectEndpoints().catch(err => {
             Logger.error('Error collecting endpoints for suggestions', err);
         });
     }
@@ -79,6 +81,8 @@ export class GoHitViewProvider implements vscode.WebviewViewProvider {
                     this.populateRequest(this.currentEndpoint);
                 }
                 this.sendEnvironments();
+                // Await initial collection before sending suggestions
+                await this.collectionPromise;
                 this.sendSuggestions();
                 this.handleFetchModels();
                 break;
@@ -96,11 +100,16 @@ export class GoHitViewProvider implements vscode.WebviewViewProvider {
                 break;
 
             case 'refreshEndpoints':
-                await this.handleRefreshEndpoints();
+                this.collectionPromise = this.handleRefreshEndpoints();
+                await this.collectionPromise;
                 break;
 
             case 'generateAIBody':
                 await this.handleGenerateAIBody(message.data);
+                break;
+
+            case 'generateAIParams':
+                await this.handleGenerateAIParams(message.data);
                 break;
 
             case 'saveSettings':
@@ -198,12 +207,6 @@ export class GoHitViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async handleSendRequest(data: any) {
-        let fullUrl = data.url;
-        if (data.baseUrl && !fullUrl.startsWith('http') && !fullUrl.startsWith('ws')) {
-            const separator = data.baseUrl.endsWith('/') || fullUrl.startsWith('/') ? '' : '/';
-            fullUrl = `${data.baseUrl}${separator}${fullUrl.startsWith('/') ? fullUrl.substring(1) : fullUrl}`;
-        }
-
         const startTime = Date.now();
 
         if (data.method === 'WS') {
@@ -212,10 +215,12 @@ export class GoHitViewProvider implements vscode.WebviewViewProvider {
                     this.activeWs.close();
                 }
 
-                let wsUrl = fullUrl;
-                if (wsUrl.startsWith('http://')) wsUrl = wsUrl.replace('http://', 'ws://');
-                if (wsUrl.startsWith('https://')) wsUrl = wsUrl.replace('https://', 'wss://');
-                if (!wsUrl.startsWith('ws')) wsUrl = 'ws://' + wsUrl;
+                let wsUrl = data.url;
+                if (data.baseUrl && !wsUrl.startsWith('ws')) {
+                    const base = data.baseUrl.replace(/\/+$/, '').replace(/^http/, 'ws');
+                    const path = data.url.replace(/^\/+/, '');
+                    wsUrl = `${base}/${path}`;
+                }
 
                 this.activeWs = new WebSocket(wsUrl);
                 const ws = this.activeWs;
@@ -268,24 +273,33 @@ export class GoHitViewProvider implements vscode.WebviewViewProvider {
             return;
         }
 
+        const request: HttpRequest = {
+            method: data.method,
+            url: data.url,
+            baseUrl: data.baseUrl,
+            headers: data.headers,
+            body: data.body
+        };
+
         try {
-            const request: HttpRequest = {
-                url: fullUrl,
-                method: data.method,
-                headers: data.headers,
-                body: data.body
-            };
-
-            Logger.info(`Sending ${request.method} request to ${request.url}`);
-
-            const response = await this.httpClient.sendRequest(request);
-
-            Logger.info(`Received response: ${response.status} ${response.statusText} (${response.time}ms)`);
-
-            this.sendResponse(response);
-        } catch (error) {
+            const result = await this.httpClient.sendRequest(request);
+            this.sendResponse({
+                status: result.status,
+                statusText: result.statusText,
+                headers: result.headers,
+                data: result.body,
+                time: result.time,
+                error: result.error
+            });
+        } catch (error: any) {
             Logger.error('Error sending request', error);
-            vscode.window.showErrorMessage('Failed to send request: ' + (error instanceof Error ? error.message : 'Unknown error'));
+            this.sendResponse({
+                status: 0,
+                statusText: 'Client Error',
+                data: null,
+                time: Date.now() - startTime,
+                error: error.message
+            });
         }
     }
 
@@ -371,9 +385,25 @@ export class GoHitViewProvider implements vscode.WebviewViewProvider {
         // Try to find local body example for context
         const suggestions = this.suggestionService.getAllEndpoints();
         const match = suggestions.find(s => s.path === data.url && s.method === data.method);
+        
+        // STRICT CHECK: If it has 2+ path params and NO detected struct, it's a "no body" API.
+        // Return {} immediately to prevent AI hallucinations.
+        if (match && match.params && match.params.length >= 2 && !match.bodyExample) {
+            this._view?.webview.postMessage({
+                type: 'aiBodyGenerated',
+                data: { body: {} }
+            });
+            return;
+        }
+
         let contextInfo = '';
-        if (match && match.bodyExample) {
-            contextInfo = `\n\nHere is a template based on the Go struct for this endpoint:\n${JSON.stringify(match.bodyExample, null, 2)}`;
+        if (match) {
+            if (match.params && match.params.length > 0) {
+                contextInfo += `\n\nNote: This API uses path parameters: ${match.params.join(', ')}.`;
+            }
+            if (match.bodyExample) {
+                contextInfo += `\n\nHere is a template based on the Go struct for this endpoint:\n${JSON.stringify(match.bodyExample, null, 2)}`;
+            }
         }
 
         if (data.currentBody && data.currentBody !== '{}' && data.currentBody !== '[]') {
@@ -382,11 +412,11 @@ export class GoHitViewProvider implements vscode.WebviewViewProvider {
 
         let systemPrompt = `You are a helpful assistant that generates JSON request bodies for API testing.
 You are generating a request for a ${data.method} request to ${data.url}.${contextInfo}
-ONLY return valid JSON. Do not include markdown formatting or explanations.`;
 
-        if (aiPrompt) {
-            systemPrompt += `\n\nUSER CUSTOM SKILLS/INSTRUCTIONS:\n${aiPrompt}`;
-        }
+IMPORTANT: You MUST strictly follow these custom instructions/skills:
+${aiPrompt || 'No specific instructions provided.'}
+
+ONLY return valid JSON. Do not include markdown formatting or explanations.`;
 
         try {
             const response = await axios.post(
@@ -439,6 +469,68 @@ ONLY return valid JSON. Do not include markdown formatting or explanations.`;
             this._view?.webview.postMessage({
                 type: 'aiBodyGenerated',
                 data: { error: errorMessage }
+            });
+        }
+    }
+
+    private async handleGenerateAIParams(data: { method: string, url: string, params: string[] }) {
+        const config = vscode.workspace.getConfiguration('gohit');
+        const apiKey = config.get<string>('openRouterApiKey');
+        const aiModel = config.get<string>('openRouterAiModel') || 'anthropic/claude-3-haiku';
+
+        if (!apiKey) {
+            this._view?.webview.postMessage({
+                type: 'aiParamsGenerated',
+                data: { error: 'OpenRouter API Key not set.' }
+            });
+            return;
+        }
+
+        const aiPrompt = config.get<string>('openRouterAiPrompt') || '';
+
+        let systemPrompt = `You are an API testing assistant. 
+Generate realistic values for the following path parameters for a ${data.method} request to ${data.url}:
+Parameters: ${data.params.join(', ')}
+
+IMPORTANT: Follow these custom instructions/skills if provided:
+${aiPrompt || 'No specific instructions provided.'}
+
+ONLY return a JSON object where keys are the parameter names and values are the suggested values. No explanations.`;
+
+        try {
+            const response = await axios.post(
+                'https://openrouter.ai/api/v1/chat/completions',
+                {
+                    model: aiModel,
+                    messages: [{ role: 'system', content: systemPrompt }]
+                },
+                {
+                    headers: { 'Authorization': `Bearer ${apiKey}` }
+                }
+            );
+
+            const rawContent = response.data.choices[0].message.content.trim();
+            let jsonParams;
+            try {
+                let cleanContent = rawContent;
+                const startIdx = cleanContent.indexOf('{');
+                const endIdx = cleanContent.lastIndexOf('}');
+                if (startIdx !== -1 && endIdx !== -1) {
+                    cleanContent = cleanContent.substring(startIdx, endIdx + 1);
+                }
+                jsonParams = JSON.parse(cleanContent);
+            } catch (e) {
+                throw new Error('AI returned invalid JSON for params');
+            }
+
+            this._view?.webview.postMessage({
+                type: 'aiParamsGenerated',
+                data: { params: jsonParams }
+            });
+        } catch (error) {
+            this._view?.webview.postMessage({
+                type: 'aiParamsGenerated',
+                data: { error: error instanceof Error ? error.message : 'Unknown error' }
             });
         }
     }

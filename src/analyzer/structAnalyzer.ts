@@ -30,12 +30,23 @@ export class StructAnalyzer {
                 continue;
             }
 
-            const fieldMatch = trimmed.match(/^(\w+)\s+(\*?[\w\[\]\.]+)(?:\s+`json:"([^"]+)"`)?/);
+            // Match: FieldName Type `tags`
+            const fieldMatch = trimmed.match(/^(\w+)\s+(\*?[\w\[\]\.]+)(?:\s+`([^`]+)`)?/);
             if (fieldMatch) {
                 const fieldName = fieldMatch[1];
                 const fieldType = fieldMatch[2];
-                const jsonTag = fieldMatch[3] || fieldName;
+                const tagsStr = fieldMatch[3] || '';
+                
+                let jsonTag = '';
+                
+                if (tagsStr) {
+                    const jsonMatch = tagsStr.match(/json:"([^"]+)"/);
+                    if (jsonMatch) {
+                        jsonTag = jsonMatch[1].split(',')[0];
+                    }
+                }
 
+                // Skip fields explicitly marked with "-"
                 if (jsonTag === '-') {
                     continue;
                 }
@@ -43,58 +54,50 @@ export class StructAnalyzer {
                 fields.push({
                     name: fieldName,
                     type: fieldType,
-                    jsonName: jsonTag.split(',')[0]
+                    jsonName: jsonTag || fieldName
                 });
             }
         }
-
         return fields;
     }
 
-    generateJSON(structInfo: StructInfo, allStructs: StructInfo[] = []): any {
+    /**
+     * Generate sample JSON from struct info
+     */
+    generateJSON(struct: StructInfo, allStructs: StructInfo[]): any {
         const result: any = {};
-
-        for (const field of structInfo.fields) {
-            const jsonName = field.jsonName || field.name;
-            result[jsonName] = this.getDefaultValue(field.type, allStructs);
+        for (const field of struct.fields) {
+            const jsonKey = field.jsonName || field.name;
+            result[jsonKey] = this.getDefaultValue(field.type, allStructs);
         }
-
         return result;
     }
 
     private getDefaultValue(goType: string, allStructs: StructInfo[]): any {
-        const cleanType = goType.replace('*', '');
-
-        if (cleanType.startsWith('[')) {
-            const innerType = cleanType.match(/\[\](.+)/)?.[1];
-            if (innerType) {
-                return [this.getDefaultValue(innerType, allStructs)];
-            }
-            return [];
+        const cleanType = goType.replace('*', '').replace('[]', '');
+        
+        if (goType.startsWith('[]')) {
+            const val = this.getDefaultValue(cleanType, allStructs);
+            return val !== null ? [val] : [];
         }
 
         switch (cleanType) {
-            case 'string':
-                return 'string';
+            case 'string': return "string";
             case 'int':
-            case 'int8':
-            case 'int16':
             case 'int32':
             case 'int64':
             case 'uint':
-            case 'uint8':
-            case 'uint16':
             case 'uint32':
             case 'uint64':
-                return 0;
             case 'float32':
-            case 'float64':
-                return 0.0;
-            case 'bool':
-                return false;
-            case 'time.Time':
-                return new Date().toISOString();
+            case 'float64': return 0;
+            case 'bool': return false;
+            case 'time.Time': return new Date().toISOString();
             default:
+                if (cleanType.startsWith('map[')) return {};
+                if (cleanType === 'interface{}' || cleanType === 'any') return {};
+                
+                // Recursive lookup
                 const customStruct = allStructs.find(s => s.name === cleanType);
                 if (customStruct) {
                     return this.generateJSON(customStruct, allStructs);

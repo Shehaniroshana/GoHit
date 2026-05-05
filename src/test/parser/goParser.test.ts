@@ -65,6 +65,21 @@ describe('GoParser', () => {
             expect(result.endpoints[0].framework).to.equal('echo');
             expect(result.endpoints[0].path).to.equal('/echo');
         });
+
+        it('should detect Chi framework', () => {
+            const content = `
+                package main
+                import "github.com/go-chi/chi/v5"
+                func main() {
+                    r := chi.NewRouter()
+                    r.Get("/chi", func(w http.ResponseWriter, r *http.Request) {})
+                }
+            `;
+            const result = parser.parse(content, 'main.go');
+            expect(result.endpoints.length).to.be.at.least(1);
+            expect(result.endpoints[0].framework).to.equal('chi');
+            expect(result.endpoints[0].path).to.equal('/chi');
+        });
     });
 
     describe('WebSocket Heuristics', () => {

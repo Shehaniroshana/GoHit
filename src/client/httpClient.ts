@@ -3,6 +3,7 @@ import axios, { AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios';
 export interface HttpRequest {
     url: string;
     method: string;
+    baseUrl?: string;
     headers?: Record<string, string>;
     body?: any;
 }
@@ -11,7 +12,7 @@ export interface HttpResponse {
     status: number;
     statusText: string;
     headers: Record<string, string>;
-    body: string;
+    body: any;
     time: number;
     error?: string;
 }
@@ -19,18 +20,34 @@ export interface HttpResponse {
 export class HttpClient {
     async sendRequest(request: HttpRequest): Promise<HttpResponse> {
         const startTime = Date.now();
+        
+        // Robust URL merging
+        let fullUrl = request.url;
+        if (request.baseUrl) {
+            const base = request.baseUrl.replace(/\/+$/, '');
+            const path = request.url.replace(/^\/+/, '');
+            fullUrl = `${base}/${path}`;
+        }
 
         try {
             const config: AxiosRequestConfig = {
-                url: request.url,
+                url: fullUrl,
                 method: request.method,
-                headers: request.headers || {},
+                headers: { ...request.headers }, // Clone to avoid side effects
                 timeout: 30000,
-                validateStatus: () => true
+                validateStatus: () => true,
+                transformResponse: [(data) => {
+                    try {
+                        return JSON.parse(data);
+                    } catch (e) {
+                        return data;
+                    }
+                }]
             };
 
-            if (request.body && ['POST', 'PUT', 'PATCH'].includes(request.method.toUpperCase())) {
-                if (typeof request.body === 'string') {
+            // Support body for any method (though GET/DELETE usually don't have them)
+            if (request.body) {
+                if (typeof request.body === 'string' && request.body.trim().startsWith('{')) {
                     try {
                         config.data = JSON.parse(request.body);
                     } catch {
@@ -40,13 +57,12 @@ export class HttpClient {
                     config.data = request.body;
                 }
 
-                if (!config.headers) {
-                    config.headers = {};
-                }
-                
-                // Only set application/json if we managed to parse it or it was an object
-                if (typeof config.data === 'object') {
-                    config.headers['Content-Type'] = 'application/json';
+                // Auto-set Content-Type if missing
+                if (!config.headers) config.headers = {};
+                if (!config.headers['Content-Type'] && !config.headers['content-type']) {
+                    if (typeof config.data === 'object') {
+                        config.headers['Content-Type'] = 'application/json';
+                    }
                 }
             }
 
@@ -57,59 +73,43 @@ export class HttpClient {
                 status: response.status,
                 statusText: response.statusText,
                 headers: response.headers as Record<string, string>,
-                body: this.formatResponseBody(response.data),
+                body: response.data,
                 time: endTime - startTime
             };
         } catch (error) {
             const endTime = Date.now();
+            let errorMessage = 'Unknown error occurred';
+            let status = 0;
+            let statusText = 'Error';
 
             if (axios.isAxiosError(error)) {
                 const axiosError = error as AxiosError;
-
                 if (axiosError.response) {
                     return {
                         status: axiosError.response.status,
                         statusText: axiosError.response.statusText,
                         headers: axiosError.response.headers as Record<string, string>,
-                        body: this.formatResponseBody(axiosError.response.data),
+                        body: axiosError.response.data,
                         time: endTime - startTime
                     };
                 } else if (axiosError.request) {
-                    return {
-                        status: 0,
-                        statusText: 'Network Error',
-                        headers: {},
-                        body: '',
-                        time: endTime - startTime,
-                        error: 'No response received from server. Check your network connection and server status.'
-                    };
+                    errorMessage = 'No response received. The server might be down or unreachable.';
+                    statusText = 'Network Error';
+                } else {
+                    errorMessage = axiosError.message;
                 }
+            } else if (error instanceof Error) {
+                errorMessage = error.message;
             }
 
             return {
-                status: 0,
-                statusText: 'Error',
+                status,
+                statusText,
                 headers: {},
-                body: '',
+                body: null,
                 time: endTime - startTime,
-                error: error instanceof Error ? error.message : 'Unknown error occurred'
+                error: errorMessage
             };
         }
-    }
-
-    private formatResponseBody(data: any): string {
-        if (typeof data === 'string') {
-            return data;
-        }
-
-        if (typeof data === 'object') {
-            try {
-                return JSON.stringify(data, null, 2);
-            } catch {
-                return String(data);
-            }
-        }
-
-        return String(data);
     }
 }

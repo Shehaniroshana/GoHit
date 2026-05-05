@@ -11,6 +11,8 @@ export interface EndpointSuggestion {
     file: string;
     line: number;
     bodyExample?: any; // Optional request body example
+    params?: string[]; // Path parameters like :id or {id}
+    fields?: string[]; // List of fields for IntelliSense-like suggestions
 }
 
 export class EndpointSuggestionService {
@@ -48,6 +50,10 @@ export class EndpointSuggestionService {
 
             Logger.info(`Found ${goFiles.length} Go files to scan for endpoints`);
 
+            // 1. Collect all structs once to avoid redundant workspace scans
+            const allStructs = await this.collectAllStructs(goFiles);
+            Logger.info(`[collectEndpoints] Collected ${allStructs.length} structs from workspace`);
+
             // Parse each file to extract endpoints
             for (const file of goFiles) {
                 try {
@@ -55,7 +61,8 @@ export class EndpointSuggestionService {
                     const fileData = await vscode.workspace.fs.readFile(file);
                     const content = Buffer.from(fileData).toString('utf8');
                     
-                    if (!content.includes('gin') && !content.includes('fiber') && !content.includes('echo') && !content.includes('http') && !content.includes('@gohit') && !content.includes('Group')) {
+                    if (!content.includes('gin') && !content.includes('fiber') && !content.includes('echo') && !content.includes('chi') && !content.includes('mux') && 
+                        !content.includes('http') && !content.includes('@gohit') && !content.includes('Group') && !content.includes('Route') && !content.includes('Mount')) {
                         continue; // Skip files that definitely don't have routes
                     }
 
@@ -66,9 +73,10 @@ export class EndpointSuggestionService {
 
                     for (const endpoint of result.endpoints) {
                         let bodyExample = undefined;
+                        let endpointFields: string[] | undefined = undefined;
 
                         // Generate body example for methods that typically have request bodies
-                        if (['POST', 'PUT', 'PATCH'].includes(endpoint.method)) {
+                        if (['POST', 'PUT', 'PATCH', 'GET/POST', 'ANY', 'ALL'].includes(endpoint.method.toUpperCase())) {
                             let requestStructName: string | null = null;
 
                             // PRIORITY 0: If from annotation and struct name provided, use it directly
@@ -88,19 +96,23 @@ export class EndpointSuggestionService {
                                     const cleanCandidate = candidate.trim();
                                     if (!cleanCandidate) continue;
 
-                                    // A. Check in current file
-                                    requestStructName = this.findRequestStructInHandler(content, cleanCandidate);
+                                    // A. Check in current file or inline body
+                                    if (cleanCandidate.startsWith('func')) {
+                                        requestStructName = this.findRequestStructInBody(cleanCandidate);
+                                    } else {
+                                        requestStructName = this.findRequestStructInHandler(content, cleanCandidate);
 
-                                    // B. Check external file (workspace) if not found and has dot
-                                    if (!requestStructName && cleanCandidate.includes('.')) {
-                                        const methodName = cleanCandidate.split('.').pop();
-                                        if (methodName) {
-                                            // 1. Try in current file with method name only
-                                            requestStructName = this.findRequestStructInHandler(content, methodName);
+                                        // B. Check external file (workspace) if not found and has dot
+                                        if (!requestStructName && cleanCandidate.includes('.')) {
+                                            const methodName = cleanCandidate.split('.').pop();
+                                            if (methodName) {
+                                                // 1. Try in current file with method name only
+                                                requestStructName = this.findRequestStructInHandler(content, methodName);
 
-                                            // 2. Try in workspace
-                                            if (!requestStructName) {
-                                                requestStructName = await this.findStructInExternalHandler(goFiles, methodName);
+                                                // 2. Try in workspace
+                                                if (!requestStructName) {
+                                                    requestStructName = await this.findStructInExternalHandler(goFiles, methodName);
+                                                }
                                             }
                                         }
                                     }
@@ -108,60 +120,58 @@ export class EndpointSuggestionService {
                                     // If we found a struct name using this candidate, we found the real handler!
                                     // Stop searching other candidates (middlewares).
                                     if (requestStructName) {
-                                        Logger.debug(`Found struct ${requestStructName} in handler ${cleanCandidate}`);
+                                        Logger.debug(`Found struct ${requestStructName} in handler ${cleanCandidate.startsWith('func') ? '<inline>' : cleanCandidate}`);
                                         break;
                                     }
                                 }
                             }
 
-                            // 2. Fallback: Keyword matching in current file
-                            if (!requestStructName) {
-                                const fuzzyStruct = structs.find(s =>
-                                    s.name.toLowerCase().includes('request') ||
-                                    s.name.toLowerCase().includes('dto') ||
-                                    s.name.toLowerCase().includes('input') ||
-                                    s.name.toLowerCase().includes('create') ||
-                                    s.name.toLowerCase().includes('update')
-                                );
-                                if (fuzzyStruct) {
-                                    requestStructName = fuzzyStruct.name;
-                                    Logger.debug(`Found struct via fuzzy match in current file: ${requestStructName}`);
+                            // PRIORITY 2: Fuzzy matching in ALL structs (smartest fallback)
+                            // Strictly disable fuzzy matching if path parameters are present to avoid incorrect suggestions
+                            const hasPathParams = this.parser.extractPathParams(endpoint.path).length > 0;
+                            if (!requestStructName && endpoint.handler && !hasPathParams) {
+                                const handlerName = endpoint.handler.split('.').pop() || '';
+                                if (handlerName && handlerName !== 'anonymous') {
+                                    const fuzzyStruct = allStructs.find((s: any) => {
+                                        const name = s.name.toLowerCase();
+                                        const lowerHandler = handlerName.toLowerCase();
+                                        return name.includes(lowerHandler) && 
+                                               (name.includes('request') || name.includes('dto') || name.includes('input') || name.includes('req'));
+                                    });
+                                    if (fuzzyStruct) {
+                                        requestStructName = fuzzyStruct.name;
+                                        Logger.info(`[FUZZY MATCH] Found struct ${requestStructName} for handler ${handlerName}`);
+                                    }
                                 }
                             }
 
-                            // 3. UNIVERSAL FALLBACK: Scan ALL structs in workspace and match by path
-                            if (!requestStructName) {
+                            // 3. UNIVERSAL FALLBACK: Match struct by analyzing the endpoint path
+                            // Disable this if we have path params, as it's likely a "param-only" API
+                            if (!requestStructName && !hasPathParams) {
                                 requestStructName = await this.findStructByPathMatching(goFiles, endpoint.path, endpoint.method);
                                 if (requestStructName) {
                                     Logger.info(`[UNIVERSAL FALLBACK] Found struct ${requestStructName} for ${endpoint.method} ${endpoint.path}`);
                                 }
                             }
 
-                            // Generate JSON if we found a struct name
-                                if (requestStructName) {
-                                    let targetStruct: any = structs.find(s => s.name === requestStructName);
-                                    let contextStructs: any[] = structs;
-
-                                    if (!targetStruct) {
-                                        Logger.info(`[STRUCT SEARCH] "${requestStructName}" not found in current file, searching workspace...`);
-                                        const result = await this.findStructInWorkspace(goFiles, requestStructName);
-                                        if (result) {
-                                            targetStruct = result.struct;
-                                            contextStructs = result.context;
-                                            Logger.info(`[STRUCT SEARCH] ✓ Found "${targetStruct.name}" in workspace`);
-                                        } else {
-                                            Logger.warn(`[STRUCT SEARCH] ✗ Could not find struct "${requestStructName}" in workspace`);
-                                        }
-                                    }
-
-                                    if (targetStruct) {
-                                        bodyExample = this.analyzer.generateJSON(targetStruct, contextStructs);
-                                        Logger.info(`✓ Generated body for ${endpoint.method} ${endpoint.path} from ${requestStructName}`);
-                                    } else {
-                                        Logger.warn(`✗ Could not find struct definition for ${requestStructName}`);
-                                    }
+                            if (requestStructName) {
+                                const targetStruct = allStructs.find((s: any) => s.name === requestStructName) || structs.find((s: any) => s.name === requestStructName);
+                                if (targetStruct) {
+                                    bodyExample = this.analyzer.generateJSON(targetStruct, allStructs);
+                                    endpointFields = targetStruct.fields.map((f: any) => f.jsonName || f.name);
+                                    Logger.info(`✓ Generated body for ${endpoint.method} ${endpoint.path} from ${requestStructName}`);
                                 } else {
-                                Logger.debug(`✗ No struct found for ${endpoint.method} ${endpoint.path}`);
+                                    Logger.warn(`✗ Could not find struct definition for ${requestStructName}`);
+                                }
+                            }
+
+                            // Smart fallback for WebSockets (AI-style suggestion)
+                            if (endpoint.method === 'WS' && !bodyExample) {
+                                bodyExample = {
+                                    type: "ping",
+                                    data: {},
+                                    timestamp: new Date().toISOString()
+                                };
                             }
                         }
 
@@ -171,7 +181,9 @@ export class EndpointSuggestionService {
                             framework: endpoint.framework,
                             file: file.fsPath,
                             line: endpoint.line,
-                            bodyExample
+                            bodyExample,
+                            params: this.parser.extractPathParams(endpoint.path),
+                            fields: endpointFields
                         });
                     }
                 } catch (error) {
@@ -179,7 +191,16 @@ export class EndpointSuggestionService {
                 }
             }
 
-            Logger.info(`Collected ${this.endpoints.length} endpoints from workspace`);
+            // Deduplicate: remove endpoints with same method + path + file
+            const seen = new Set<string>();
+            this.endpoints = this.endpoints.filter(ep => {
+                const key = `${ep.method}:${ep.path}:${ep.file}`;
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+
+            Logger.info(`Collected ${this.endpoints.length} endpoints from workspace (after dedup)`);
         } catch (error) {
             Logger.error('Error collecting endpoints', error);
         }
@@ -188,60 +209,51 @@ export class EndpointSuggestionService {
     }
 
     /**
-     * UNIVERSAL FALLBACK: Match struct by analyzing the endpoint path
-     * E.g., /api/users/create => CreateUserRequest, UserCreateRequest, CreateUser, etc.
+     * Last resort: Find a struct in the workspace that matches the endpoint path
      */
     private async findStructByPathMatching(files: vscode.Uri[], path: string, method: string): Promise<string | null> {
-        Logger.debug(`[UNIVERSAL FALLBACK] Searching for struct matching path: ${path}`);
+        // Only for methods that usually have bodies
+        if (!['POST', 'PUT', 'PATCH'].includes(method.toUpperCase())) {
+            return null;
+        }
 
-        // Extract meaningful words from path
-        const pathParts = path.split('/').filter(p => p && p !== 'api' && p !== 'v1' && p !== 'v2' && !p.startsWith(':'));
+        const pathSegments = path.toLowerCase().split(/[\\\\/]/).filter(s => s && s.length > 2 && s !== 'api' && s !== 'v1' && s !== 'v2');
+        if (pathSegments.length === 0) return null;
 
-        // Generate possible struct name patterns
+        const allStructs = await this.collectAllStructs(files);
         const patterns: string[] = [];
 
-        // Pattern 1: Method + Resource (CreateUser, UpdateProduct)
-        const methodPrefix = method === 'POST' ? 'Create' : method === 'PUT' || method === 'PATCH' ? 'Update' : '';
-        if (methodPrefix && pathParts.length > 0) {
-            const resource = pathParts[pathParts.length - 1];
-            const singular = resource.endsWith('s') ? resource.slice(0, -1) : resource;
-            patterns.push(`${methodPrefix}${this.capitalize(singular)}`);
-        }
+        // Generate patterns based on path segments
+        // e.g., /admin/users/create -> UserCreate, CreateUser
+        const lastPart = pathSegments[pathSegments.length - 1];
+        const secondLastPart = pathSegments.length > 1 ? pathSegments[pathSegments.length - 2] : '';
+        const resource = secondLastPart || lastPart;
+        const singular = resource.endsWith('s') ? resource.slice(0, -1) : resource;
 
-        // Pattern 2: Resource + Method (UserCreate, ProductUpdate)
-        if (pathParts.length > 0) {
-            const resource = pathParts[pathParts.length - 1];
-            const singular = resource.endsWith('s') ? resource.slice(0, -1) : resource;
-            if (method === 'POST') patterns.push(`${this.capitalize(singular)}Create`);
-            if (method === 'PUT' || method === 'PATCH') patterns.push(`${this.capitalize(singular)}Update`);
+        if (lastPart === 'create' || method === 'POST') {
+            patterns.push(`Create${this.capitalize(singular)}`);
+            patterns.push(`${this.capitalize(singular)}Create`);
+        } else if (lastPart === 'update' || method === 'PUT' || method === 'PATCH') {
+            patterns.push(`Update${this.capitalize(singular)}`);
+            patterns.push(`${this.capitalize(singular)}Update`);
         }
+        
+        patterns.push(this.capitalize(singular));
 
         Logger.debug(`[UNIVERSAL FALLBACK] Generated patterns: ${patterns.join(', ')}`);
 
-        // Search all files for structs matching these patterns
-        for (const file of files) {
-            try {
-                const document = await vscode.workspace.openTextDocument(file);
-                const content = document.getText();
-                const allStructs = this.analyzer.parseStructs(content);
+        for (const pattern of patterns) {
+            const matched = allStructs.find(s =>
+                s.name === `${pattern}Request` ||
+                s.name === `${pattern}Input` ||
+                s.name === `${pattern}DTO` ||
+                s.name === `${pattern}Req` ||
+                s.name === pattern
+            );
 
-                for (const pattern of patterns) {
-                    // Look for struct names that include the pattern + Request/Input/DTO
-                    const matched = allStructs.find(s =>
-                        s.name === `${pattern}Request` ||
-                        s.name === `${pattern}Input` ||
-                        s.name === `${pattern}DTO` ||
-                        s.name === `${pattern}Req` ||
-                        s.name === pattern
-                    );
-
-                    if (matched) {
-                        Logger.debug(`[UNIVERSAL FALLBACK] Matched struct: ${matched.name}`);
-                        return matched.name;
-                    }
-                }
-            } catch (e) {
-                // Ignore file read errors
+            if (matched) {
+                Logger.debug(`[UNIVERSAL FALLBACK] Matched struct: ${matched.name}`);
+                return matched.name;
             }
         }
 
@@ -320,7 +332,6 @@ export class EndpointSuggestionService {
     private findRequestStructInHandler(content: string, handlerName: string): string | null {
         try {
             // Find function definition: func (recv) handlerName(...) { OR func handlerName(...) {
-            // This regex now supports receivers and multi-line signatures (basic)
             const funcRegex = new RegExp(`func\\s+(?:\\([^)]+\\)\\s+)?${handlerName}\\s*\\(`, 'm');
             const funcMatch = content.match(funcRegex);
 
@@ -328,12 +339,20 @@ export class EndpointSuggestionService {
                 return null;
             }
 
-            // Extract function body (variable scope)
+            // Extract function body correctly by finding the first { after the signature
             const startIndex = funcMatch.index + funcMatch[0].length;
-            let braceCount = 1;
-            let endIndex = startIndex;
-
+            let bodyStart = -1;
             for (let i = startIndex; i < content.length; i++) {
+                if (content[i] === '{') {
+                    bodyStart = i;
+                    break;
+                }
+            }
+            if (bodyStart === -1) return null;
+
+            let braceCount = 1;
+            let endIndex = bodyStart;
+            for (let i = bodyStart + 1; i < content.length; i++) {
                 if (content[i] === '{') braceCount++;
                 if (content[i] === '}') braceCount--;
                 if (braceCount === 0) {
@@ -342,35 +361,72 @@ export class EndpointSuggestionService {
                 }
             }
 
-            const funcBody = content.substring(startIndex, endIndex);
+            const funcBody = content.substring(bodyStart, endIndex + 1);
+            return this.findRequestStructInBody(funcBody);
+        } catch (e) {
+            return null;
+        }
+    }
 
-            // Look for JSON binding calls
-            // Common patterns:
-            // Gin: c.BindJSON(&req), c.ShouldBindJSON(&req)
-            // Fiber: c.BodyParser(&req)
-            // Echo: c.Bind(&req)
-            // net/http: json.NewDecoder(r.Body).Decode(&req)
-            const bindRegex = /\.(?:BindJSON|ShouldBindJSON|BodyParser|Bind|Decode)\s*\(\s*&([a-zA-Z0-9_]+)/;
-            const bindMatch = funcBody.match(bindRegex);
+    /**
+     * Analyze extracted function body to find the struct used for JSON binding
+     */
+    private findRequestStructInBody(funcBody: string): string | null {
+        try {
+            // Expanded binding patterns
+            const bindingPatterns = [
+                /\.ShouldBindJSON\(&(\w+)\)/,
+                /\.BindJSON\(&(\w+)\)/,
+                /\.ShouldBind\(&(\w+)\)/,
+                /\.Bind\(&(\w+)\)/,
+                /json\.NewDecoder\(.*\.Body\)\.Decode\(&(\w+)\)/,
+                /c\.JSON\(&(\w+)\)/,
+                /c\.BodyParser\(&(\w+)\)/
+            ];
 
-            if (bindMatch) {
-                const varName = bindMatch[1];
+            for (const pattern of bindingPatterns) {
+                const match = funcBody.match(pattern);
+                if (!match) continue;
 
-                // 1. Check for standard var declaration: var req RequestType or var req models.RequestType
+                const varName = match[1];
+                
+                // 1. Check for var declaration: var req RequestType
                 const varDeclRegex = new RegExp(`var\\s+${varName}\\s+([a-zA-Z0-9_\\.]+)`);
                 const varMatch = funcBody.match(varDeclRegex);
                 if (varMatch) return varMatch[1];
 
-                // 2. Check for short declaration: req := RequestType{}
-                const shortDeclRegex = new RegExp(`${varName}\\s*:=\\s*([a-zA-Z0-9_\\.]+)\\s*{`);
+                // 2. Check for short declaration: req := RequestType{} or req := &RequestType{}
+                const shortDeclRegex = new RegExp(`${varName}\\s*:=\\s*(?:&)?([a-zA-Z0-9_\\.]+)\\s*{`);
                 const shortMatch = funcBody.match(shortDeclRegex);
                 if (shortMatch) return shortMatch[1];
+
+                // 3. Check for new(): req := new(RequestType)
+                const newRegex = new RegExp(`${varName}\\s*:=\\s*new\\s*\\(\\s*([a-zA-Z0-9_\\.]+)\\s*\\)`);
+                const newMatch = funcBody.match(newRegex);
+                if (newMatch) return newMatch[1];
             }
 
             return null;
         } catch (e) {
             return null;
         }
+    }
+
+    /**
+     * Collect all structs from all Go files in the workspace
+     */
+    private async collectAllStructs(files: vscode.Uri[]): Promise<any[]> {
+        const allStructs: any[] = [];
+        for (const file of files) {
+            try {
+                const fileData = await vscode.workspace.fs.readFile(file);
+                const content = Buffer.from(fileData).toString('utf8');
+                allStructs.push(...this.analyzer.parseStructs(content));
+            } catch (e) {
+                // Ignore
+            }
+        }
+        return allStructs;
     }
 
     /**
